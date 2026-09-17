@@ -2,4 +2,4 @@ services:
   - type: web
     name: kroma
     env: docker
-    preDeployCommand: npm run db:migrate
+    preDeployCommand: npm run db:migrate && node scripts/generate-admin-password.js KromaSecureAdmin2026!
