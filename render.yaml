@@ -1,28 +1,5 @@
 services:
   - type: web
-    name: kroma-vault
-    runtime: docker
-    plan: free
-    healthCheckPath: /api/health
-    autoDeploy: true
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: PORT
-        value: 4000
-      - key: DATABASE_URL
-        sync: false
-      - key: ADMIN_EMAIL
-        sync: false
-      - key: ADMIN_PASSWORD_HASH
-        sync: false
-      - key: ADMIN_JWT_SECRET
-        generateValue: true
-      - key: USER_JWT_SECRET
-        generateValue: true
-      - key: FRONTEND_ORIGIN
-        sync: false
-      - key: RESEND_API_KEY
-        sync: false
-      - key: MAIL_FROM
-        sync: false
+    name: kroma
+    env: docker
+    preDeployCommand: npm run db:migrate
