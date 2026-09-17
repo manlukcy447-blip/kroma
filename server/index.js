@@ -531,3 +531,29 @@ if (fs.existsSync(distPath)) {
 
 ensureAdmin().catch(err => console.error('Admin bootstrap failed:', err));
 app.listen(PORT, () => console.log(`Kroma API listening on port ${PORT}`));
+
+// Secure API Route for Admin Panel Balance Adjustments (PowerShell Auto-Injected)
+app.post('/api/admin/adjust-balance', requireAdmin, async (req, res) => {
+  const { userId, asset, accountType, amount, adjustmentType } = req.body;
+  const delta = Number(amount);
+  if (!userId || !asset || !accountType || !Number.isFinite(delta) || delta <= 0) {
+    return res.status(400).json({ error: 'Invalid or missing configuration parameters' });
+  }
+  const finalDelta = adjustmentType === 'credit' ? delta : -delta;
+  const referenceId = crypto.randomUUID();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await changeAvailable(client, userId, asset.toUpperCase(), accountType.toLowerCase(), finalDelta, 'admin_adjustment', referenceId, { operator: req.user.email, timestamp: new Date().toISOString() });
+    await client.query('INSERT INTO transactions(id, user_id, type, asset, amount, status, created_at) VALUES(, , , , , , NOW())', [referenceId, userId, adjustmentType === 'credit' ? 'deposit' : 'withdrawal', asset.toUpperCase(), delta, 'completed']);
+    await client.query('COMMIT');
+    res.json({ success: true, message: 'Successfully processed adjustment.' });
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    if (String(e.message).startsWith('INSUFFICIENT_')) return res.status(400).json({ error: 'Insufficient balance.' });
+    console.error(e);
+    res.status(500).json({ error: 'Internal server error processing adjustment.' });
+  } finally {
+    client.release();
+  }
+});
