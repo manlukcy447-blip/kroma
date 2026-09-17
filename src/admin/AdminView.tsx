@@ -1,3 +1,4 @@
+import { BalanceAdjustmentForm } from './BalanceAdjustmentForm';
 import React, { useEffect, useState } from 'react';
 import { apiFetch } from './api';
 import { ShieldCheck, Plus, Pencil, Trash2, RefreshCw, LogOut, Activity, Users, ArrowDownToLine, ScrollText } from 'lucide-react';
