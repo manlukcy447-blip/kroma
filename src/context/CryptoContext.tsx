@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+﻿import React, { createContext, useContext, useState, useEffect } from 'react';
 import { 
   NavigationTab, 
   FiatCurrency, 
@@ -125,7 +125,32 @@ export const CryptoProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setOrders(mapped.filter((x:any)=>x.status==='open'));
     setOrderHistory(mapped.filter((x:any)=>x.status!=='open'));
   };
-  useEffect(()=>{refreshWallet().catch(()=>{});},[]);
+  useEffect(() => {
+  refreshWallet().catch(() => {});
+
+  const refreshOnFocus = () => {
+    refreshWallet().catch(() => {});
+  };
+
+  const refreshOnVisibility = () => {
+    if (document.visibilityState === "visible") {
+      refreshWallet().catch(() => {});
+    }
+  };
+
+  window.addEventListener("focus", refreshOnFocus);
+  document.addEventListener("visibilitychange", refreshOnVisibility);
+
+  const interval = window.setInterval(() => {
+    refreshWallet().catch(() => {});
+  }, 15000);
+
+  return () => {
+    window.removeEventListener("focus", refreshOnFocus);
+    document.removeEventListener("visibilitychange", refreshOnVisibility);
+    window.clearInterval(interval);
+  };
+}, []);
   
   // Modals state
   const [depositModalOpen, setDepositModalOpen] = useState(false);
@@ -332,3 +357,4 @@ export const useCrypto = () => {
   }
   return context;
 };
+
