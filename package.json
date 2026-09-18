@@ -12,7 +12,8 @@
     "server": "node server/index.js",
     "start": "node server/index.js",
     "db:generate-admin": "node scripts/generate-admin-password.js",
-    "db:migrate": "node scripts/migrate.js"
+    "db:migrate": "node scripts/migrate.js",
+    "db:generate-recovery": "node scripts/generate-admin-recovery-key.js"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

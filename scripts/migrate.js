@@ -12,6 +12,7 @@ try {
   await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT');
   await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ');
   await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 0');
+  await pool.query('ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 0');
   await pool.query('CREATE INDEX IF NOT EXISTS users_email_lower_idx ON users (lower(email))');
   console.log('Database migration complete.');
 } finally { await pool.end(); }

@@ -16,6 +16,7 @@ const JWT_SECRET = process.env.ADMIN_JWT_SECRET;
 const USER_JWT_SECRET = process.env.USER_JWT_SECRET || process.env.ADMIN_JWT_SECRET;
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
 const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH;
+const ADMIN_RECOVERY_KEY_HASH = process.env.ADMIN_RECOVERY_KEY_HASH;
 
 if (!DATABASE_URL) console.warn('DATABASE_URL is not set. The API will not start correctly until PostgreSQL is configured.');
 if (!JWT_SECRET) console.warn('ADMIN_JWT_SECRET is not set. Admin authentication requires this secret.');
@@ -51,6 +52,17 @@ function verifyPassword(password, stored) {
   if (scheme !== 'scrypt' || !salt || !hash) return false;
   const derived = crypto.scryptSync(password, salt, 64).toString('hex');
   return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(derived, 'hex'));
+}
+function hashRecoveryKey(key) { return crypto.createHash('sha256').update(String(key || '')).digest('hex'); }
+function verifyRecoveryKey(key) {
+  if (!ADMIN_RECOVERY_KEY_HASH || !key) return false;
+  return safeEqualText(hashRecoveryKey(key), ADMIN_RECOVERY_KEY_HASH);
+}
+function normalizePositiveDecimal(value) {
+  const raw = String(value ?? '').trim();
+  if (!/^(?:0|[1-9]\d*)(?:\.\d{1,18})?$/.test(raw)) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? raw : null;
 }
 function b64url(value) { return Buffer.from(value).toString('base64url'); }
 function signToken(payload) {
@@ -145,12 +157,15 @@ function getAuthToken(req) {
   const auth = req.headers.authorization || '';
   return auth.startsWith('Bearer ') ? auth.slice(7) : '';
 }
-function requireAdmin(req, res, next) {
+async function requireAdmin(req, res, next) {
   try {
     const token = getAuthToken(req);
     const user = verifyToken(token);
     if (!user || !user.adminId || !['admin', 'super_admin'].includes(user.role)) return res.status(401).json({ error: 'Unauthorized' });
-    req.admin = user;
+    const result = await pool.query('SELECT id,email,role,session_version FROM admin_users WHERE id=$1', [user.adminId]);
+    const admin = result.rows[0];
+    if (!admin || Number(admin.session_version || 0) !== Number(user.version || 0)) return res.status(401).json({ error: 'Admin session expired.' });
+    req.admin = { ...user, email: admin.email, role: admin.role, version: Number(admin.session_version || 0) };
     next();
   } catch { res.status(401).json({ error: 'Unauthorized' }); }
 }
@@ -330,7 +345,7 @@ app.post('/api/wallet/internal-transfer', requireUser, async (req,res)=>{
 app.post('/api/wallet/deposit-intent', requireUser, async (req,res)=>{
   const asset=String(req.body?.asset||'').toUpperCase(), network=String(req.body?.network||'').trim(), amount=req.body?.amount==null?null:positiveAmount(req.body.amount), txHash=String(req.body?.txHash||'').trim()||null;
   if(!asset || !network) return res.status(400).json({error:'Asset and network are required'});
-  try { const {rows}=await pool.query(`SELECT id,asset,network,address,min_deposit AS "minDeposit",instructions FROM deposit_addresses WHERE asset=$1 AND network=$2 AND enabled=true LIMIT 1`,[asset,network]); if(!rows[0]) return res.status(400).json({error:'No active deposit address is configured for this network.'}); const min=Number(rows[0].minDeposit||0); if(amount!==null && Number(amount)<min) return res.status(400).json({error:`Minimum deposit is ${min} ${asset}.`}); const id=crypto.randomUUID(); await pool.query(`INSERT INTO deposit_requests(id,user_id,asset,network,amount,tx_hash) VALUES($1,$2,$3,$4,$5,$6)`,[id,req.user.userId,asset,network,amount,txHash]); await pool.query(`INSERT INTO transactions(id,user_id,type,asset,amount,status,tx_hash,network) VALUES($1,$2,'deposit',$3,$4,'pending',$5,$6)`,[id,req.user.userId,asset,amount||0,txHash,network]); res.status(201).json({success:true,depositId:id,status:'pending',message:'Pending Verification — Your deposit has been received and is currently awaiting verification. Blockchain transactions can sometimes take longer than expected while network confirmations are being completed and the transaction is reviewed.'}); }
+  try { const {rows}=await pool.query(`SELECT id,asset,network,address,min_deposit AS "minDeposit",instructions FROM user_deposit_addresses WHERE user_id=$1 AND asset=$2 AND network=$3 AND enabled=true UNION ALL SELECT id,asset,network,address,min_deposit AS "minDeposit",instructions FROM deposit_addresses WHERE asset=$2 AND network=$3 AND enabled=true AND NOT EXISTS (SELECT 1 FROM user_deposit_addresses WHERE user_id=$1 AND asset=$2 AND network=$3 AND enabled=true) LIMIT 1`,[req.user.userId,asset,network]); if(!rows[0]) return res.status(400).json({error:'No active deposit address is configured for this network.'}); const min=Number(rows[0].minDeposit||0); if(amount!==null && Number(amount)<min) return res.status(400).json({error:`Minimum deposit is ${min} ${asset}.`}); const id=crypto.randomUUID(); await pool.query(`INSERT INTO deposit_requests(id,user_id,asset,network,amount,tx_hash) VALUES($1,$2,$3,$4,$5,$6)`,[id,req.user.userId,asset,network,amount,txHash]); await pool.query(`INSERT INTO transactions(id,user_id,type,asset,amount,status,tx_hash,network) VALUES($1,$2,'deposit',$3,$4,'pending',$5,$6)`,[id,req.user.userId,asset,amount||0,txHash,network]); res.status(201).json({success:true,depositId:id,status:'pending',message:'Pending Verification — Your deposit has been received and is currently awaiting verification. Blockchain transactions can sometimes take longer than expected while network confirmations are being completed and the transaction is reviewed.'}); }
   catch(e){ if(e.code==='23505') return res.status(409).json({error:'This transaction hash is already being processed.'}); console.error(e); res.status(500).json({error:'Unable to submit deposit'}); }
 });
 
@@ -364,10 +379,40 @@ app.post('/api/admin/login', loginRateLimit, async (req, res) => {
     if (admin.totp_enabled && !verifyTotp(admin.totp_secret, req.body?.otp)) return res.status(401).json({ error: 'Authenticator code required.' });
     if (process.env.REQUIRE_ADMIN_2FA === 'true' && !admin.totp_enabled) return res.status(403).json({ error: 'Admin 2FA enrollment is required before login.' });
     loginAttempts.delete(req.loginAttempt.key);
-    const token = signToken({ adminId: admin.id, email: admin.email, role: admin.role, exp: Math.floor(Date.now() / 1000) + 60 * 60 * 8 });
+    const token = signToken({ adminId: admin.id, email: admin.email, role: admin.role, version: Number(admin.session_version || 0), exp: Math.floor(Date.now() / 1000) + 60 * 60 * 8 });
     res.setHeader('Set-Cookie', `kroma_admin=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${8 * 60 * 60}${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`);
     res.json({ admin: { id: admin.id, email: admin.email, role: admin.role } });
   } catch (e) { console.error(e); res.status(500).json({ error: 'Login failed' }); }
+});
+
+
+app.post('/api/admin/recovery', loginRateLimit, async (req, res) => {
+  const recoveryKey = String(req.body?.recoveryKey || '');
+  const newEmail = String(req.body?.newEmail || '').trim().toLowerCase();
+  const newPassword = String(req.body?.newPassword || '');
+  if (!verifyRecoveryKey(recoveryKey)) return res.status(401).json({ error: 'Invalid recovery key.' });
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) return res.status(400).json({ error: 'A valid new admin email is required.' });
+  if (!passwordValid(newPassword)) return res.status(400).json({ error: 'New password must be 10–128 characters.' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const current = await client.query('SELECT id,email FROM admin_users ORDER BY created_at ASC LIMIT 1 FOR UPDATE');
+    if (!current.rows[0]) {
+      const id = crypto.randomUUID();
+      await client.query('INSERT INTO admin_users(id,email,password_hash,role) VALUES($1,$2,$3,$4)', [id, newEmail, hashPassword(newPassword), 'super_admin']);
+      await client.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)', [id, 'admin_recovery_create', 'admin', id, JSON.stringify({ newEmail })]);
+    } else {
+      const adminId = current.rows[0].id;
+      const conflict = await client.query('SELECT id FROM admin_users WHERE lower(email)=lower($1) AND id<>$2', [newEmail, adminId]);
+      if (conflict.rowCount) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'That email is already assigned to another admin.' }); }
+      await client.query('UPDATE admin_users SET email=$1,password_hash=$2,session_version=COALESCE(session_version,0)+1 WHERE id=$3', [newEmail, hashPassword(newPassword), adminId]);
+      await client.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)', [adminId, 'admin_recovery_reset', 'admin', adminId, JSON.stringify({ previousEmail: current.rows[0].email, newEmail })]);
+    }
+    await client.query('COMMIT');
+    res.setHeader('Set-Cookie', 'kroma_admin=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');
+    res.json({ success: true, message: 'Admin credentials updated. Sign in with the new email and password.' });
+  } catch (e) { await client.query('ROLLBACK').catch(()=>{}); console.error(e); res.status(500).json({ error: 'Unable to complete admin recovery.' }); }
+  finally { client.release(); }
 });
 
 
@@ -452,6 +497,27 @@ app.get('/api/admin/users', requireAdmin, async (_req, res) => {
   const { rows } = await pool.query('SELECT id,email,status,kyc_status AS "kycStatus",created_at AS "createdAt" FROM users ORDER BY created_at DESC LIMIT 200');
   res.json({ users: rows });
 });
+
+app.get('/api/admin/users/:userId/deposit-addresses', requireAdmin, async (req,res)=>{
+  const user=await pool.query('SELECT id,email FROM users WHERE id=$1',[req.params.userId]);
+  if(!user.rowCount) return res.status(404).json({error:'User not found.'});
+  const {rows}=await pool.query(`SELECT id,user_id AS "userId",asset,network,address,label,min_deposit AS "minDeposit",instructions,enabled,created_at AS "createdAt",updated_at AS "updatedAt" FROM user_deposit_addresses WHERE user_id=$1 ORDER BY asset,network`,[req.params.userId]);
+  res.json({user:user.rows[0],addresses:rows});
+});
+app.post('/api/admin/users/:userId/deposit-addresses', requireAdmin, async (req,res)=>{
+  const {asset,network,address,label='',minDeposit=0,instructions='',enabled=true}=req.body||{};
+  if(!asset||!network||!address) return res.status(400).json({error:'asset, network and address are required.'});
+  const user=await pool.query('SELECT id,email FROM users WHERE id=$1',[req.params.userId]); if(!user.rowCount) return res.status(404).json({error:'User not found.'});
+  const id=crypto.randomUUID();
+  try { const {rows}=await pool.query(`INSERT INTO user_deposit_addresses(id,user_id,asset,network,address,label,min_deposit,instructions,enabled) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id,user_id AS "userId",asset,network,address,label,min_deposit AS "minDeposit",instructions,enabled`,[id,req.params.userId,String(asset).toUpperCase(),String(network).trim(),String(address).trim(),label,Number(minDeposit)||0,instructions,Boolean(enabled)]); await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)',[req.admin.adminId,'create','user_deposit_address',id,JSON.stringify({userId:req.params.userId,userEmail:user.rows[0].email,asset,network})]); res.status(201).json({address:rows[0]}); }
+  catch(e){if(e.code==='23505')return res.status(409).json({error:'This user already has an address for that asset/network.'});console.error(e);res.status(500).json({error:'Unable to create user deposit address.'});}
+});
+app.put('/api/admin/users/:userId/deposit-addresses/:id', requireAdmin, async (req,res)=>{
+  const {asset,network,address,label='',minDeposit=0,instructions='',enabled=true}=req.body||{};
+  try { const old=await pool.query('SELECT * FROM user_deposit_addresses WHERE id=$1 AND user_id=$2',[req.params.id,req.params.userId]); if(!old.rowCount)return res.status(404).json({error:'User deposit address not found.'}); const {rows}=await pool.query(`UPDATE user_deposit_addresses SET asset=$1,network=$2,address=$3,label=$4,min_deposit=$5,instructions=$6,enabled=$7,updated_at=NOW() WHERE id=$8 AND user_id=$9 RETURNING id,user_id AS "userId",asset,network,address,label,min_deposit AS "minDeposit",instructions,enabled`,[String(asset).toUpperCase(),String(network).trim(),String(address).trim(),label,Number(minDeposit)||0,instructions,Boolean(enabled),req.params.id,req.params.userId]); await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)',[req.admin.adminId,'update','user_deposit_address',req.params.id,JSON.stringify({userId:req.params.userId,previous:old.rows[0],next:rows[0]})]); res.json({address:rows[0]}); } catch(e){if(e.code==='23505')return res.status(409).json({error:'This user already has an address for that asset/network.'});console.error(e);res.status(500).json({error:'Unable to update user deposit address.'});}
+});
+app.delete('/api/admin/users/:userId/deposit-addresses/:id', requireAdmin, async (req,res)=>{try{const old=await pool.query('SELECT id,asset,network FROM user_deposit_addresses WHERE id=$1 AND user_id=$2',[req.params.id,req.params.userId]);if(!old.rowCount)return res.status(404).json({error:'User deposit address not found.'});await pool.query('DELETE FROM user_deposit_addresses WHERE id=$1 AND user_id=$2',[req.params.id,req.params.userId]);await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)',[req.admin.adminId,'delete','user_deposit_address',req.params.id,JSON.stringify({userId:req.params.userId,asset:old.rows[0].asset,network:old.rows[0].network})]);res.status(204).end()}catch(e){console.error(e);res.status(500).json({error:'Unable to delete user deposit address.'})}});
+
 app.get('/api/admin/transactions', requireAdmin, async (_req, res) => {
   const { rows } = await pool.query('SELECT id,user_id AS "userId",type,asset,amount,status,tx_hash AS "txHash",network,created_at AS "createdAt" FROM transactions ORDER BY created_at DESC LIMIT 200');
   res.json({ transactions: rows });
@@ -532,28 +598,38 @@ if (fs.existsSync(distPath)) {
 ensureAdmin().catch(err => console.error('Admin bootstrap failed:', err));
 app.listen(PORT, () => console.log(`Kroma API listening on port ${PORT}`));
 
-// Secure API Route for Admin Panel Balance Adjustments (PowerShell Auto-Injected)
+// Admin balance adjustments. These change the internal Kroma ledger only; they do not broadcast blockchain transactions.
 app.post('/api/admin/adjust-balance', requireAdmin, async (req, res) => {
-  const { userId, asset, accountType, amount, adjustmentType } = req.body;
-  const delta = Number(amount);
-  if (!userId || !asset || !accountType || !Number.isFinite(delta) || delta <= 0) {
-    return res.status(400).json({ error: 'Invalid or missing configuration parameters' });
+  const userId = String(req.body?.userId || '').trim();
+  const asset = String(req.body?.asset || '').trim().toUpperCase();
+  const accountType = String(req.body?.accountType || 'spot').trim().toLowerCase();
+  const adjustmentType = String(req.body?.adjustmentType || '').trim().toLowerCase();
+  const amount = normalizePositiveDecimal(req.body?.amount);
+  const reason = String(req.body?.reason || '').trim().slice(0, 500);
+  if (!userId || !asset || !['spot','funding','earn'].includes(accountType) || !['credit','debit'].includes(adjustmentType) || !amount || !reason) {
+    return res.status(400).json({ error: 'User, asset, account type, adjustment type, amount and reason are required.' });
   }
-  const finalDelta = adjustmentType === 'credit' ? delta : -delta;
   const referenceId = crypto.randomUUID();
+  const delta = adjustmentType === 'credit' ? amount : `-${amount}`;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await changeAvailable(client, userId, asset.toUpperCase(), accountType.toLowerCase(), finalDelta, 'admin_adjustment', referenceId, { operator: req.user.email, timestamp: new Date().toISOString() });
-    await client.query('INSERT INTO transactions(id, user_id, type, asset, amount, status, created_at) VALUES(, , , , , , NOW())', [referenceId, userId, adjustmentType === 'credit' ? 'deposit' : 'withdrawal', asset.toUpperCase(), delta, 'completed']);
+    const user = await client.query('SELECT id,email FROM users WHERE id=$1 FOR UPDATE', [userId]);
+    if (!user.rowCount) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'User not found.' }); }
+    await changeAvailable(client, userId, asset, accountType, delta, 'admin_adjustment', referenceId, {
+      adminId: req.admin.adminId, adminEmail: req.admin.email, adjustmentType, reason
+    });
+    await client.query(`INSERT INTO transactions(id,user_id,type,asset,amount,status,network,created_at) VALUES($1,$2,$3,$4,$5::numeric,'completed',$6,NOW())`, [
+      referenceId, userId, adjustmentType === 'credit' ? 'admin_credit' : 'admin_debit', asset, amount, 'internal'
+    ]);
+    await client.query(`INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)`, [
+      req.admin.adminId, adjustmentType, 'wallet', userId, JSON.stringify({ userId, userEmail: user.rows[0].email, asset, accountType, amount, reason, referenceId })
+    ]);
     await client.query('COMMIT');
-    res.json({ success: true, message: 'Successfully processed adjustment.' });
+    res.json({ success: true, referenceId, balances: await getWalletBalances(userId) });
   } catch (e) {
-    await client.query('ROLLBACK').catch(() => {});
-    if (String(e.message).startsWith('INSUFFICIENT_')) return res.status(400).json({ error: 'Insufficient balance.' });
-    console.error(e);
-    res.status(500).json({ error: 'Internal server error processing adjustment.' });
-  } finally {
-    client.release();
-  }
+    await client.query('ROLLBACK').catch(()=>{});
+    if (String(e.message).startsWith('INSUFFICIENT_')) return res.status(400).json({ error: `Insufficient ${asset} balance for this debit.` });
+    console.error(e); res.status(500).json({ error: 'Unable to apply balance adjustment.' });
+  } finally { client.release(); }
 });

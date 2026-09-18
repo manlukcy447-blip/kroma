@@ -5,7 +5,8 @@ CREATE TABLE IF NOT EXISTS admin_users (
   role TEXT NOT NULL DEFAULT 'admin',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   totp_secret TEXT,
-  totp_enabled BOOLEAN NOT NULL DEFAULT FALSE
+  totp_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  session_version INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS deposit_addresses (
@@ -49,6 +50,24 @@ CREATE TABLE IF NOT EXISTS users (
   last_login_at TIMESTAMPTZ,
   session_version INTEGER NOT NULL DEFAULT 0
 );
+
+
+
+CREATE TABLE IF NOT EXISTS user_deposit_addresses (
+  id UUID PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  asset TEXT NOT NULL,
+  network TEXT NOT NULL,
+  address TEXT NOT NULL,
+  label TEXT,
+  min_deposit NUMERIC(36,18) NOT NULL DEFAULT 0,
+  instructions TEXT,
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(user_id, asset, network)
+);
+CREATE INDEX IF NOT EXISTS user_deposit_addresses_user_idx ON user_deposit_addresses(user_id, asset, network);
 
 CREATE TABLE IF NOT EXISTS password_reset_tokens (
   id UUID PRIMARY KEY,
@@ -212,3 +231,5 @@ CREATE TABLE IF NOT EXISTS security_events (
 
 ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS totp_secret TEXT;
 ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+
+ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 0;
