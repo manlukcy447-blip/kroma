@@ -342,7 +342,24 @@ app.post('/api/wallet/internal-transfer', requireUser, async (req,res)=>{
   catch(e){ await client.query('ROLLBACK').catch(()=>{}); if(String(e.message).startsWith('INSUFFICIENT_')) return res.status(400).json({error:`Insufficient ${asset} balance.`}); console.error(e); res.status(500).json({error:'Transfer failed'}); } finally { client.release(); }
 });
 
-app.post('/api/wallet/deposit-intent', requireUser, async (req,res)=>{
+
+// Patched Payment Confirmation Handler
+app.post('/api/wallet/deposits/:id/confirm-payment', requireUser, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { rows } = await pool.query(
+      "UPDATE deposit_intents SET status = 'awaiting_approval', updated_at = NOW() WHERE id = $1 AND user_id = $2 RETURNING id",
+      [id, req.user.userId]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Deposit record not found or unauthorized.' });
+    res.json({ success: true, message: 'Payment submitted for admin review successfully!' });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Unable to process confirmation.' });
+  }
+});
+
+  app.post('/api/wallet/deposit-intent', requireUser, async (req,res)=>{
   const asset=String(req.body?.asset||'').toUpperCase(), network=String(req.body?.network||'').trim(), amount=req.body?.amount==null?null:positiveAmount(req.body.amount), txHash=String(req.body?.txHash||'').trim()||null;
   if(!asset || !network) return res.status(400).json({error:'Asset and network are required'});
   try { const {rows}=await pool.query(`SELECT id,asset,network,address,min_deposit AS "minDeposit",instructions FROM user_deposit_addresses WHERE user_id=$1 AND asset=$2 AND network=$3 AND enabled=true UNION ALL SELECT id,asset,network,address,min_deposit AS "minDeposit",instructions FROM deposit_addresses WHERE asset=$2 AND network=$3 AND enabled=true AND NOT EXISTS (SELECT 1 FROM user_deposit_addresses WHERE user_id=$1 AND asset=$2 AND network=$3 AND enabled=true) LIMIT 1`,[req.user.userId,asset,network]); if(!rows[0]) return res.status(400).json({error:'No active deposit address is configured for this network.'}); const min=Number(rows[0].minDeposit||0); if(amount!==null && Number(amount)<min) return res.status(400).json({error:`Minimum deposit is ${min} ${asset}.`}); const id=crypto.randomUUID(); await pool.query(`INSERT INTO deposit_requests(id,user_id,asset,network,amount,tx_hash) VALUES($1,$2,$3,$4,$5,$6)`,[id,req.user.userId,asset,network,amount,txHash]); await pool.query(`INSERT INTO transactions(id,user_id,type,asset,amount,status,tx_hash,network) VALUES($1,$2,'deposit',$3,$4,'pending',$5,$6)`,[id,req.user.userId,asset,amount||0,txHash,network]); res.status(201).json({success:true,depositId:id,status:'pending',message:'Pending Verification — Your deposit has been received and is currently awaiting verification. Blockchain transactions can sometimes take longer than expected while network confirmations are being completed and the transaction is reviewed.'}); }
