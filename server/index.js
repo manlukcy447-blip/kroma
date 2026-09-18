@@ -250,7 +250,7 @@ function positiveAmount(v) { const n = Number(v); return Number.isFinite(n) && n
 async function getWalletBalances(userId) {
   const { rows } = await pool.query(`SELECT asset, account_type AS "accountType", available, locked FROM wallets WHERE user_id=$1 ORDER BY asset, account_type`, [userId]);
   const out = {};
-  for (const r of rows) { out[r.asset] ||= { spot:0, funding:0, earn:0, locked:0 }; out[r.asset][r.accountType] = Number(r.available); out[r.asset].locked += Number(r.locked); }
+  for (const r of rows) { out[r.asset] ||= { spot:0, funding:0, earn:0, locked:0 }; out[r.asset][r.accountType] = parseFloat(r.available || 0); out[r.asset].locked += Number(r.locked); }
   return out;
 }
 async function ensureWallet(client, userId, asset, accountType='spot') {
