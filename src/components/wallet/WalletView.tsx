@@ -44,7 +44,7 @@ export const WalletView: React.FC = () => {
 
   balanceEntries.forEach(([sym, bal]) => {
     const asset = assets.find(a => a.symbol === sym);
-    const p = asset?.priceUsd || 1;
+    let p = asset?.priceUsd; if (!p || p === 0) { const fallbacks = { USDT: 1, USDC: 1, BTC: 65000, ETH: 3500, KROMA: 2.5 }; p = fallbacks[sym.toUpperCase()] || 1; }
     totalSpotUsd += (bal.spot + (bal.locked || 0)) * p;
     totalFundingUsd += bal.funding * p;
     totalEarnUsd += bal.earn * p;
