@@ -1,0 +1,5 @@
+services:
+  - type: web
+    name: kroma-wallet
+    env: docker
+    preDeployCommand: npm run db:migrate && node scripts/seed-production-sandbox.js
