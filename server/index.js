@@ -275,13 +275,6 @@ app.post('/api/auth/reset-password', async(req,res)=>{
 
 
 function positiveAmount(v) { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : null; }
-function normalizePositiveDecimal(v) {
-  if (v == null) return null;
-  const s = String(v).trim();
-  if (!/^\d+(\.\d+)?$/.test(s)) return null;
-  const n = Number(s);
-  return Number.isFinite(n) && n > 0 ? s : null;
-}
 
 async function getUserFeeClearance(userId) {
   try {
@@ -1177,13 +1170,12 @@ app.post('/api/admin/users/:userId/fee-clearance/release', requireAdmin, async (
 export { app, pool, ensureAdmin };
 
 // Serve the built frontend when deployed as a standalone script.
-const distPath = path.resolve(__dirname, '..', 'dist');
-if (fs.existsSync(distPath) && !process.env.AIS_MIDDLEWARE) {
-  app.use(express.static(distPath));
-  app.get('*', (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
-}
-
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+  const distPath = path.resolve(__dirname, '..', 'dist');
+  if (fs.existsSync(distPath)) {
+    app.use(express.static(distPath));
+    app.get('*', (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
+  }
   ensureAdmin().catch(err => console.error('Admin bootstrap failed:', err));
   app.listen(PORT, '0.0.0.0', () => console.log(`Kroma API listening on port ${PORT}`));
 }
