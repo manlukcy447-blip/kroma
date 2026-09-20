@@ -1,0 +1,8 @@
+{
+  "name": "Kroma Crypto Wallet & Exchange",
+  "description": "A high-performance crypto wallet and digital asset exchange featuring real-time spot trading, order book matching, multi-network custody, P2P marketplace, yield earn, and advanced security.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

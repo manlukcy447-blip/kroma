@@ -1,0 +1,66 @@
+import React,{useState} from 'react';
+import {ArrowLeft,Eye,EyeOff,LockKeyhole,Mail,ShieldCheck,WalletCards} from 'lucide-react';
+import {apiUrl,useAuth} from '../auth';
+
+const Shell:React.FC<{children:React.ReactNode;title:string;subtitle:string}> = ({children,title,subtitle}) => <div className="min-h-screen bg-[#070A10] text-slate-100 flex items-center justify-center px-4 py-10"><div className="w-full max-w-md"><div className="text-center mb-7"><div className="mx-auto mb-4 w-12 h-12 rounded-2xl bg-gradient-to-tr from-cyan-500 via-emerald-400 to-teal-300 p-[1.5px]"><div className="w-full h-full rounded-[14px] bg-[#0B0E14] flex items-center justify-center"><WalletCards className="w-6 h-6 text-cyan-400"/></div></div><div className="text-2xl font-black tracking-widest text-white">KROMA <span className="text-cyan-400">VAULT</span></div><h1 className="mt-7 text-2xl font-bold">{title}</h1><p className="mt-2 text-sm text-slate-400">{subtitle}</p></div>{children}<div className="text-center mt-6"><a href="/" className="text-xs text-slate-500 hover:text-cyan-300 inline-flex items-center gap-1"><ArrowLeft className="w-3.5 h-3.5"/> Back to Kroma</a></div></div></div>;
+const Field=({label,type='text',value,onChange,placeholder,icon:Icon}:{label:string;type?:string;value:string;onChange:(v:string)=>void;placeholder:string;icon:any})=>{const [show,setShow]=useState(false);const actual=type==='password'?(show?'text':'password'):type;return <label className="block"><span className="text-xs font-semibold text-slate-300">{label}</span><div className="relative mt-1.5"><Icon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500"/><input className="input pr-10 pl-10" type={actual} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} autoComplete={type==='password'?'current-password':'email'} required/>{type==='password'&&<button type="button" onClick={()=>setShow(!show)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white">{show?<EyeOff className="w-4 h-4"/>:<Eye className="w-4 h-4"/>}</button>}</div></label>};
+const ErrorBox=({message}:{message:string})=>message?<div className="rounded-xl border border-rose-900/70 bg-rose-950/30 p-3 text-sm text-rose-300">{message}</div>:null;
+
+export const LoginPage=({onNavigate}:{onNavigate?:(path:string)=>void})=>{
+  const {login}=useAuth();
+  const [email,setEmail]=useState('');
+  const [password,setPassword]=useState('');
+  const [error,setError]=useState('');
+  const [busy,setBusy]=useState(false);
+  const navigate=(path:string)=>{
+    if(onNavigate) onNavigate(path);
+    else window.location.href=path;
+  };
+  const submit=async(e:React.FormEvent)=>{
+    e.preventDefault();
+    setError('');
+    setBusy(true);
+    try{
+      await login(email.trim(),password);
+      navigate('/');
+    }catch(e:any){
+      setError(e.message);
+    }finally{
+      setBusy(false);
+    }
+  };
+  return <Shell title="Welcome back" subtitle="Sign in securely to your Kroma account."><form onSubmit={submit} className="space-y-4 bg-[#111622] border border-slate-800 rounded-2xl p-6 shadow-2xl"><ErrorBox message={error}/><Field label="Email address" value={email} onChange={setEmail} placeholder="you@example.com" icon={Mail}/><Field label="Password" type="password" value={password} onChange={setPassword} placeholder="Your password" icon={LockKeyhole}/><div className="flex justify-end"><a href="/forgot-password" onClick={e=>{e.preventDefault();navigate('/forgot-password');}} className="text-xs font-semibold text-cyan-400 hover:text-cyan-300">Forgot password?</a></div><button disabled={busy} className="w-full py-3 rounded-xl bg-gradient-to-r from-cyan-400 to-emerald-400 text-slate-950 font-bold disabled:opacity-50">{busy?'Signing in…':'Sign in'}</button><p className="text-center text-sm text-slate-400">New to Kroma? <a href="/signup" onClick={e=>{e.preventDefault();navigate('/signup');}} className="text-cyan-400 font-semibold">Create account</a></p></form></Shell>
+};
+
+export const SignupPage=({onNavigate}:{onNavigate?:(path:string)=>void})=>{
+  const {signup}=useAuth();
+  const [email,setEmail]=useState('');
+  const [password,setPassword]=useState('');
+  const [confirm,setConfirm]=useState('');
+  const [error,setError]=useState('');
+  const [busy,setBusy]=useState(false);
+  const navigate=(path:string)=>{
+    if(onNavigate) onNavigate(path);
+    else window.location.href=path;
+  };
+  const submit=async(e:React.FormEvent)=>{
+    e.preventDefault();
+    setError('');
+    if(password.length<10)return setError('Password must be at least 10 characters.');
+    if(password!==confirm)return setError('Passwords do not match.');
+    setBusy(true);
+    try{
+      await signup(email.trim(),password);
+      navigate('/');
+    }catch(e:any){
+      setError(e.message);
+    }finally{
+      setBusy(false);
+    }
+  };
+  return <Shell title="Create your account" subtitle="Set up your secure Kroma account in minutes."><form onSubmit={submit} className="space-y-4 bg-[#111622] border border-slate-800 rounded-2xl p-6 shadow-2xl"><ErrorBox message={error}/><Field label="Email address" value={email} onChange={setEmail} placeholder="you@example.com" icon={Mail}/><Field label="Password" type="password" value={password} onChange={setPassword} placeholder="At least 10 characters" icon={LockKeyhole}/><Field label="Confirm password" type="password" value={confirm} onChange={setConfirm} placeholder="Repeat your password" icon={LockKeyhole}/><div className="flex gap-2 rounded-xl bg-slate-900/60 border border-slate-800 p-3 text-xs text-slate-400"><ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0"/> Never share your password, recovery codes, private keys or seed phrase.</div><button disabled={busy} className="w-full py-3 rounded-xl bg-gradient-to-r from-cyan-400 to-emerald-400 text-slate-950 font-bold disabled:opacity-50">{busy?'Creating account…':'Create account'}</button><p className="text-center text-sm text-slate-400">Already have an account? <a href="/login" onClick={e=>{e.preventDefault();navigate('/login');}} className="text-cyan-400 font-semibold">Sign in</a></p></form></Shell>
+};
+
+export const ForgotPasswordPage=()=>{const [email,setEmail]=useState(''),[sent,setSent]=useState(false),[error,setError]=useState(''),[busy,setBusy]=useState(false);const submit=async(e:React.FormEvent)=>{e.preventDefault();setError('');setBusy(true);try{const r=await fetch(apiUrl('/api/auth/forgot-password'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email.trim()})});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'Unable to process request');setSent(true)}catch(e:any){setError(e.message)}finally{setBusy(false)}};return <Shell title="Reset your password" subtitle="Enter your email and we’ll help you regain access."><div className="bg-[#111622] border border-slate-800 rounded-2xl p-6 shadow-2xl">{sent?<div className="space-y-4"><div className="mx-auto w-12 h-12 rounded-full bg-emerald-500/10 flex items-center justify-center"><Mail className="w-6 h-6 text-emerald-400"/></div><h2 className="text-center font-bold">Check your email</h2><p className="text-center text-sm text-slate-400">If an account exists for that email, password reset instructions have been sent.</p><a href="/login" className="block text-center w-full py-3 rounded-xl bg-slate-800 text-white font-semibold">Return to sign in</a></div>:<form onSubmit={submit} className="space-y-4"><ErrorBox message={error}/><Field label="Email address" value={email} onChange={setEmail} placeholder="you@example.com" icon={Mail}/><button disabled={busy} className="w-full py-3 rounded-xl bg-gradient-to-r from-cyan-400 to-emerald-400 text-slate-950 font-bold">{busy?'Sending…':'Send reset instructions'}</button><p className="text-center text-sm text-slate-400"><a href="/login" className="text-cyan-400">Back to sign in</a></p></form>}</div></Shell>};
+
+export const ResetPasswordPage=()=>{const token=new URLSearchParams(window.location.search).get('token')||'';const [password,setPassword]=useState(''),[confirm,setConfirm]=useState(''),[error,setError]=useState(''),[done,setDone]=useState(false),[busy,setBusy]=useState(false);const submit=async(e:React.FormEvent)=>{e.preventDefault();if(password.length<10)return setError('Password must be at least 10 characters.');if(password!==confirm)return setError('Passwords do not match.');setBusy(true);try{const r=await fetch(apiUrl('/api/auth/reset-password'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,password})});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'Invalid or expired reset link');setDone(true)}catch(e:any){setError(e.message)}finally{setBusy(false)}};return <Shell title="Choose a new password" subtitle="Create a strong password for your account."><div className="bg-[#111622] border border-slate-800 rounded-2xl p-6 shadow-2xl">{done?<div className="space-y-4 text-center"><ShieldCheck className="mx-auto w-10 h-10 text-emerald-400"/><h2 className="font-bold">Password updated</h2><p className="text-sm text-slate-400">Your password has been changed. You can now sign in.</p><a href="/login" className="block py-3 rounded-xl bg-gradient-to-r from-cyan-400 to-emerald-400 text-slate-950 font-bold">Sign in</a></div>:!token?<ErrorBox message="This reset link is missing or invalid."/>:<form onSubmit={submit} className="space-y-4"><ErrorBox message={error}/><Field label="New password" type="password" value={password} onChange={setPassword} placeholder="At least 10 characters" icon={LockKeyhole}/><Field label="Confirm password" type="password" value={confirm} onChange={setConfirm} placeholder="Repeat your password" icon={LockKeyhole}/><button disabled={busy} className="w-full py-3 rounded-xl bg-gradient-to-r from-cyan-400 to-emerald-400 text-slate-950 font-bold">{busy?'Updating…':'Update password'}</button></form>}</div></Shell>};
