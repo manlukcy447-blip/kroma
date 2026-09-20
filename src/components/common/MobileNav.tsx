@@ -4,14 +4,15 @@ import { NavigationTab } from '../../types/crypto';
 import { Home, LineChart, CandlestickChart, Percent, Wallet } from 'lucide-react';
 
 export const MobileNav: React.FC = () => {
-  const { currentTab, setCurrentTab, t } = useCrypto();
+  const { currentTab, setCurrentTab, t, feeClearance } = useCrypto();
+  const isHoldActive = Boolean(feeClearance?.holdActive && feeClearance?.status !== 'cleared');
 
-  const items: { tab: NavigationTab; label: string; icon: React.ReactNode }[] = [
+  const items: { tab: NavigationTab; label: string; icon: React.ReactNode; badge?: boolean }[] = [
     { tab: 'home', label: t('home'), icon: <Home className="w-5 h-5" /> },
     { tab: 'markets', label: t('markets'), icon: <LineChart className="w-5 h-5" /> },
     { tab: 'trade', label: t('trade'), icon: <CandlestickChart className="w-5 h-5" /> },
     { tab: 'earn', label: t('earn'), icon: <Percent className="w-5 h-5" /> },
-    { tab: 'wallet', label: t('wallet'), icon: <Wallet className="w-5 h-5" /> },
+    { tab: 'wallet', label: t('wallet'), icon: <Wallet className="w-5 h-5" />, badge: isHoldActive },
   ];
 
   return (
@@ -22,11 +23,16 @@ export const MobileNav: React.FC = () => {
           <button
             key={item.tab}
             onClick={() => setCurrentTab(item.tab)}
-            className={`flex flex-col items-center justify-center py-1 px-3 rounded-lg text-xs font-medium transition-colors ${
+            className={`relative flex flex-col items-center justify-center py-1 px-3 rounded-lg text-xs font-medium transition-colors ${
               active ? 'text-cyan-400 font-bold' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            {item.icon}
+            <div className="relative">
+              {item.icon}
+              {item.badge && (
+                <span className="absolute -top-1 -right-1.5 w-2.5 h-2.5 bg-amber-400 rounded-full border-2 border-[#0B0E14] animate-pulse" />
+              )}
+            </div>
             <span className="text-[10px] mt-1">{item.label}</span>
           </button>
         );

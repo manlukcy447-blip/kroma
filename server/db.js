@@ -110,7 +110,18 @@ async function initPglite() {
   const dataDir = path.resolve(process.cwd(), '.data', 'pgdata');
   fs.mkdirSync(dataDir, { recursive: true });
 
-  const pglite = new PGlite(dataDir);
+  let pglite;
+  try {
+    pglite = new PGlite(dataDir);
+    await pglite.query('SELECT 1');
+  } catch (err) {
+    console.warn('[Kroma Database] PGlite directory was damaged or corrupted, re-initializing clean storage:', err.message);
+    try {
+      fs.rmSync(dataDir, { recursive: true, force: true });
+      fs.mkdirSync(dataDir, { recursive: true });
+    } catch (_) {}
+    pglite = new PGlite(dataDir);
+  }
   isPglite = true;
 
   await ensureSchema(pglite);

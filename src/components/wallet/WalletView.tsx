@@ -18,7 +18,6 @@ import {
 } from 'lucide-react';
 import { TransactionRecord } from '../../types/crypto';
 import { FeeClearanceBanner } from './FeeClearanceBanner';
-import { FeeClearanceModal } from './FeeClearanceModal';
 
 export const WalletView: React.FC = () => {
   const {
@@ -36,9 +35,7 @@ export const WalletView: React.FC = () => {
     formatFiat,
     refreshWallet,
     confirmDepositPayment,
-    feeClearanceModalOpen,
     openFeeClearanceModal,
-    closeFeeClearanceModal,
     t,
   } = useCrypto();
 
@@ -772,9 +769,6 @@ export const WalletView: React.FC = () => {
           </div>
         </div>
       )}
-
-      {/* Fee Clearance Deposit & Status Modal */}
-      <FeeClearanceModal isOpen={feeClearanceModalOpen} onClose={closeFeeClearanceModal} />
     </div>
   );
 };

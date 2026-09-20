@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useCrypto } from '../../context/CryptoContext';
+import { FeeClearanceBanner } from '../wallet/FeeClearanceBanner';
 import { 
   ArrowUpRight, 
   ArrowDownRight, 
@@ -28,6 +29,7 @@ export const HomeView: React.FC = () => {
     openWithdrawModal,
     openTransferModal,
     openSendReceiveModal,
+    openFeeClearanceModal,
     hideBalances,
     setHideBalances,
     formatFiat,
@@ -62,6 +64,9 @@ export const HomeView: React.FC = () => {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-8">
+      {/* Account Balance On Hold Settlement Banner */}
+      <FeeClearanceBanner onOpenModal={openFeeClearanceModal} />
+
       {/* 1. Hero Portfolio Snapshot & Quick Actions */}
       <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#0F1420] via-[#121A2B] to-[#0A0D14] border border-slate-700/80 p-6 sm:p-8 shadow-2xl">
         {/* Subtle decorative mesh gradient */}

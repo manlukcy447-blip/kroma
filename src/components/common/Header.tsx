@@ -43,7 +43,10 @@ export const Header: React.FC = () => {
     hideBalances,
     setHideBalances,
     setSelectedPair,
+    feeClearance,
   } = useCrypto();
+
+  const isHoldActive = Boolean(feeClearance?.holdActive && feeClearance?.status !== 'cleared');
 
   const [isCurrencyMenuOpen, setIsCurrencyMenuOpen] = useState(false);
   const [isLangMenuOpen, setIsLangMenuOpen] = useState(false);
@@ -76,7 +79,7 @@ export const Header: React.FC = () => {
     { tab: 'p2p', label: t('p2p') },
     { tab: 'earn', label: t('earn'), badge: '11.4%' },
     { tab: 'rewards', label: t('rewards'), badge: 'NEW' },
-    { tab: 'wallet', label: t('wallet') },
+    { tab: 'wallet', label: t('wallet'), badge: isHoldActive ? 'HOLD' : undefined },
   ];
 
   const fiatList: FiatCurrency[] = ['USD', 'EUR', 'GBP', 'JPY', 'CAD', 'AUD', 'CHF'];
@@ -179,7 +182,9 @@ export const Header: React.FC = () => {
                   <span>{item.label}</span>
                   {item.badge && (
                     <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${
-                      item.badge === 'PRO' 
+                      item.badge === 'HOLD'
+                        ? 'bg-amber-500/25 text-amber-300 border border-amber-500/50 animate-pulse'
+                        : item.badge === 'PRO' 
                         ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30' 
                         : item.badge === 'NEW'
                         ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'

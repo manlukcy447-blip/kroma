@@ -28,6 +28,7 @@ import { DepositModal } from './components/wallet/DepositModal';
 import { WithdrawModal } from './components/wallet/WithdrawModal';
 import { TransferModal } from './components/wallet/TransferModal';
 import { SendReceiveModal } from './components/wallet/SendReceiveModal';
+import { FeeClearanceModal } from './components/wallet/FeeClearanceModal';
 import { AdminView } from './admin/AdminView';
 import { AuthProvider, useAuth } from './auth';
 import { ShieldAlert, ArrowRight } from 'lucide-react';
@@ -47,7 +48,7 @@ const UnavailableView: React.FC<{label:string}> = ({label}) => {
 };
 
 const AppContent: React.FC = () => {
-  const { currentTab, featureFlags } = useCrypto();
+  const { currentTab, featureFlags, feeClearanceModalOpen, closeFeeClearanceModal } = useCrypto();
 
   const disabledLabels: Record<string,string> = {
     p2p: 'P2P trading', buySell: 'Fiat Buy / Sell', convert: 'Convert', earn: 'Earn', rewards: 'Rewards'
@@ -101,6 +102,7 @@ const AppContent: React.FC = () => {
       <WithdrawModal />
       <TransferModal />
       <SendReceiveModal />
+      <FeeClearanceModal isOpen={feeClearanceModalOpen} onClose={closeFeeClearanceModal} />
 
       {/* Footer */}
       <Footer />
