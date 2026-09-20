@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useCrypto } from '../../context/CryptoContext';
-import { X, ArrowUpRight, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { X, ArrowUpRight, AlertTriangle, CheckCircle2, Lock, ShieldAlert } from 'lucide-react';
 
 export const WithdrawModal: React.FC = () => {
   const {
@@ -11,6 +11,8 @@ export const WithdrawModal: React.FC = () => {
     balances,
     executeWithdrawal,
     refreshWallet,
+    feeClearance,
+    openFeeClearanceModal,
   } = useCrypto();
 
   const [selectedSymbol, setSelectedSymbol] = useState(activeModalAsset || 'USDT');
@@ -33,6 +35,7 @@ export const WithdrawModal: React.FC = () => {
   };
 
   const availableBalance = balances[currentAsset.symbol]?.spot || 0;
+  const isHeld = Boolean(feeClearance?.holdActive && feeClearance?.status !== 'cleared');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -100,6 +103,28 @@ export const WithdrawModal: React.FC = () => {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          {isHeld && (
+            <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs space-y-2">
+              <div className="flex items-center gap-2 font-bold text-amber-300">
+                <Lock className="w-4 h-4 text-amber-400" />
+                <span>Balance On Hold — Fee Clearance Required</span>
+              </div>
+              <p className="text-slate-300 text-[11px] leading-relaxed">
+                {feeClearance?.reason || `Withdrawals are locked until the clearance fee of ${feeClearance?.feeAmount} ${feeClearance?.feeAsset} is deposited into the fee clearance account.`}
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  closeWithdrawModal();
+                  openFeeClearanceModal();
+                }}
+                className="w-full py-2 px-3 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs transition-colors flex items-center justify-center gap-1.5"
+              >
+                <span>Deposit Fee &amp; Clear Hold</span>
+              </button>
+            </div>
+          )}
+
           <div>
             <label className="text-xs font-semibold text-slate-300 block mb-1">Asset</label>
             <select
@@ -217,10 +242,10 @@ export const WithdrawModal: React.FC = () => {
             </button>
             <button
               type="submit"
-              disabled={isSubmitting || !amount || parseFloat(amount) <= 0}
+              disabled={isSubmitting || isHeld || !amount || parseFloat(amount) <= 0}
               className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-rose-500 to-amber-500 hover:opacity-95 text-white font-bold text-xs transition-all shadow-md shadow-rose-500/20 disabled:opacity-40"
             >
-              {isSubmitting ? 'Submitting...' : 'Confirm Withdrawal'}
+              {isSubmitting ? 'Submitting...' : isHeld ? 'Balance On Hold (Fee Required)' : 'Confirm Withdrawal'}
             </button>
           </div>
         </form>

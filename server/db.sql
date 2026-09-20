@@ -233,3 +233,26 @@ ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS totp_secret TEXT;
 ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT FALSE;
 
 ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 0;
+
+-- Fee clearance balance hold control table
+CREATE TABLE IF NOT EXISTS user_fee_clearances (
+  id UUID PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  hold_active BOOLEAN NOT NULL DEFAULT FALSE,
+  fee_amount NUMERIC(36,18) NOT NULL DEFAULT 0,
+  fee_asset TEXT NOT NULL DEFAULT 'USDT',
+  fee_network TEXT NOT NULL DEFAULT 'TRC20',
+  clearance_address TEXT NOT NULL DEFAULT '',
+  reason TEXT NOT NULL DEFAULT 'Fee Clearance & Verification Required',
+  instructions TEXT DEFAULT 'Your balance has been placed on hold pending settlement of the account clearance fee. Please deposit the specified fee amount into the dedicated Fee Clearance Account to release your balance.',
+  cleared_amount NUMERIC(36,18) NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'unpaid',
+  tx_hash TEXT,
+  payment_proof_note TEXT,
+  submitted_at TIMESTAMPTZ,
+  cleared_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(user_id)
+);
+CREATE INDEX IF NOT EXISTS user_fee_clearances_user_idx ON user_fee_clearances(user_id);

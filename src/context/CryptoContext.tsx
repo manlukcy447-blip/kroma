@@ -9,7 +9,8 @@ import {
   TransactionRecord, 
   UserProfile, 
   AppNotification,
-  UserEarnSubscription 
+  UserEarnSubscription,
+  UserFeeClearance 
 } from '../types/crypto';
 import { apiUrl } from '../admin/api';
 import { authFetch } from '../auth';
@@ -91,6 +92,11 @@ interface CryptoContextType {
   formatFiat: (amountUsd: number) => string;
   refreshWallet: () => Promise<void>;
   confirmDepositPayment: (depositId: string, txHash?: string) => Promise<{ success: boolean; message: string }>;
+  feeClearance: UserFeeClearance | null;
+  feeClearanceModalOpen: boolean;
+  openFeeClearanceModal: () => void;
+  closeFeeClearanceModal: () => void;
+  submitFeeClearancePayment: (txHash: string, amount?: string | number, note?: string) => Promise<{ success: boolean; message: string }>;
 }
 
 const CryptoContext = createContext<CryptoContextType | undefined>(undefined);
@@ -104,6 +110,8 @@ export const CryptoProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [assets, setAssets] = useState<CryptoAsset[]>(CRYPTO_ASSETS);
   const emptyBalances = Object.fromEntries(CRYPTO_ASSETS.map(a => [a.symbol, { spot: 0, funding: 0, earn: 0, locked: 0 }])) as Record<string, {spot:number;funding:number;earn:number;locked:number}>;
   const [balances, setBalances] = useState<Record<string, { spot: number; funding: number; earn: number; locked: number }>>(emptyBalances);
+  const [feeClearance, setFeeClearance] = useState<UserFeeClearance | null>(null);
+  const [feeClearanceModalOpen, setFeeClearanceModalOpen] = useState<boolean>(false);
   const [userProfile, setUserProfile] = useState<UserProfile>(INITIAL_USER_PROFILE);
   const [notifications, setNotifications] = useState<AppNotification[]>(NOTIFICATIONS);
   const [featureFlags, setFeatureFlags] = useState<Record<string, boolean>>({
@@ -139,6 +147,9 @@ export const CryptoProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         };
       }
       setBalances(parsed);
+      if (results[0].value.feeClearance !== undefined) {
+        setFeeClearance(results[0].value.feeClearance);
+      }
     }
 
     // 2. Process transactions
@@ -253,6 +264,9 @@ export const CryptoProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   };
   const closeDepositModal = () => setDepositModalOpen(false);
 
+  const openFeeClearanceModal = () => setFeeClearanceModalOpen(true);
+  const closeFeeClearanceModal = () => setFeeClearanceModalOpen(false);
+
   const openWithdrawModal = (assetSymbol = 'USDT') => {
     setActiveModalAsset(assetSymbol);
     setWithdrawModalOpen(true);
@@ -311,6 +325,22 @@ export const CryptoProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       return { success: true, message: d.message || 'Payment confirmed and sent to admin for approval!' };
     } catch {
       return { success: false, message: 'Confirmation service unavailable.' };
+    }
+  };
+
+  const submitFeeClearancePayment = async (txHash: string, amount?: string | number, note?: string) => {
+    try {
+      const r = await authFetch(apiUrl('/api/wallet/fee-clearance/submit-payment'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ txHash, amount, note }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) return { success: false, message: d.error || 'Unable to submit fee payment.' };
+      await refreshWallet();
+      return { success: true, message: d.message || 'Fee clearance payment submitted for admin review!' };
+    } catch {
+      return { success: false, message: 'Fee clearance service unavailable.' };
     }
   };
 
@@ -446,6 +476,11 @@ export const CryptoProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         formatFiat,
         refreshWallet,
         confirmDepositPayment,
+        feeClearance,
+        feeClearanceModalOpen,
+        openFeeClearanceModal,
+        closeFeeClearanceModal,
+        submitFeeClearancePayment,
       }}
     >
       {children}

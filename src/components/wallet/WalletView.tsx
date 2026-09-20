@@ -17,6 +17,8 @@ import {
   Check
 } from 'lucide-react';
 import { TransactionRecord } from '../../types/crypto';
+import { FeeClearanceBanner } from './FeeClearanceBanner';
+import { FeeClearanceModal } from './FeeClearanceModal';
 
 export const WalletView: React.FC = () => {
   const {
@@ -34,6 +36,9 @@ export const WalletView: React.FC = () => {
     formatFiat,
     refreshWallet,
     confirmDepositPayment,
+    feeClearanceModalOpen,
+    openFeeClearanceModal,
+    closeFeeClearanceModal,
     t,
   } = useCrypto();
 
@@ -171,6 +176,9 @@ export const WalletView: React.FC = () => {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-6">
+      {/* Fee Clearance Balance Hold Banner */}
+      <FeeClearanceBanner onOpenModal={openFeeClearanceModal} />
+
       {/* Pending Deposits Notice Banner */}
       {pendingDeposits.length > 0 && (
         <div className="rounded-2xl bg-cyan-950/40 border border-cyan-500/40 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-lg">
@@ -764,6 +772,9 @@ export const WalletView: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Fee Clearance Deposit & Status Modal */}
+      <FeeClearanceModal isOpen={feeClearanceModalOpen} onClose={closeFeeClearanceModal} />
     </div>
   );
 };

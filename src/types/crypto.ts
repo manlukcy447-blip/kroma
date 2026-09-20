@@ -176,3 +176,23 @@ export interface AppNotification {
   timestamp: number;
   read: boolean;
 }
+
+export interface UserFeeClearance {
+  id?: string;
+  userId?: string;
+  holdActive: boolean;
+  feeAmount: string | number;
+  feeAsset: string;
+  feeNetwork: string;
+  clearanceAddress: string;
+  reason?: string;
+  instructions?: string;
+  clearedAmount?: string | number;
+  status: 'unpaid' | 'submitted' | 'cleared';
+  txHash?: string | null;
+  paymentProofNote?: string | null;
+  submittedAt?: string | null;
+  clearedAt?: string | null;
+  updatedAt?: string | null;
+}
+

