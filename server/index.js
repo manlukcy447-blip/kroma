@@ -518,7 +518,7 @@ app.post('/api/admin/login', loginRateLimit, async (req, res) => {
     loginAttempts.delete(req.loginAttempt.key);
     const token = signToken({ adminId: admin.id, email: admin.email, role: admin.role, version: Number(admin.session_version || 0), exp: Math.floor(Date.now() / 1000) + 60 * 60 * 8 });
     res.setHeader('Set-Cookie', `kroma_admin=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${8 * 60 * 60}${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`);
-    res.json({ admin: { id: admin.id, email: admin.email, role: admin.role } });
+    res.json({ admin: { id: admin.id, email: admin.email, role: admin.role }, token });
   } catch (e) { console.error(e); res.status(500).json({ error: 'Login failed' }); }
 });
 
