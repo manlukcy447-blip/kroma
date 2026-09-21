@@ -49,9 +49,10 @@ export const AdminRewardsControl: React.FC = () => {
   const handleToggleRegion = async (id: string, current: boolean) => {
     try {
       await apiFetch(`/api/admin/rewards/items/${id}/toggle-region`, { method: 'POST' });
-      setItems(prev => prev.map(item => item.id === id ? { ...item, regionRestricted: !current } : item));
-      setStatusMessage('Regional restriction updated.');
-      setTimeout(() => setStatusMessage(null), 2500);
+      const nextState = !current;
+      setItems(prev => prev.map(item => item.id === id ? { ...item, regionRestricted: nextState } : item));
+      setStatusMessage(nextState ? 'Confirmation: Restricted ON - Users clicking to claim will see "Regional Restriction".' : 'Confirmation: Restriction OFF - Reward program allowed globally.');
+      setTimeout(() => setStatusMessage(null), 4000);
     } catch {
       // ignore
     }
@@ -226,13 +227,13 @@ export const AdminRewardsControl: React.FC = () => {
                 </span>
                 <button
                   onClick={() => handleToggleRegion(item.id, item.regionRestricted)}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors ${
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
                     item.regionRestricted
-                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30'
+                      ? 'bg-amber-500 text-slate-950 font-black hover:bg-amber-400 shadow-sm shadow-amber-500/20'
                       : 'bg-slate-800 text-slate-400 hover:text-white'
                   }`}
                 >
-                  {item.regionRestricted ? 'Restricted (On)' : 'Allowed (Off)'}
+                  {item.regionRestricted ? 'Restricted ON' : 'Restricted OFF'}
                 </button>
               </div>
 

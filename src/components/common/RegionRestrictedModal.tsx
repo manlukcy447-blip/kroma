@@ -33,17 +33,18 @@ export const RegionRestrictedModal: React.FC = () => {
 
         {/* Icon & Badge */}
         <div className="flex items-center gap-3 mb-4">
-          <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
+          <div className="w-12 h-12 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400">
             <Globe className="w-6 h-6" />
           </div>
           <div>
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs font-semibold">
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/30 text-amber-300 text-[11px] font-bold uppercase tracking-wider">
               <Lock className="w-3 h-3" />
-              <span>Jurisdiction Compliance</span>
+              <span>Regional Restriction</span>
             </div>
-            <h2 className="text-lg font-bold text-white mt-1">
-              Not Available in Your Region
+            <h2 className="text-xl font-black text-white mt-1">
+              Regional Restriction
             </h2>
+            <p className="text-xs font-semibold text-amber-300">Not Available in Your Region</p>
           </div>
         </div>
 

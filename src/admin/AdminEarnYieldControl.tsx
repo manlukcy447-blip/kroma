@@ -62,9 +62,10 @@ export const AdminEarnYieldControl: React.FC = () => {
   const handleToggleRegion = async (id: string, current: boolean) => {
     try {
       await apiFetch(`/api/admin/earn/products/${id}/toggle-region`, { method: 'POST' });
-      setProducts(prev => prev.map(p => p.id === id ? { ...p, regionRestricted: !current } : p));
-      setActionStatus('Regional restriction status updated.');
-      setTimeout(() => setActionStatus(null), 2500);
+      const nextState = !current;
+      setProducts(prev => prev.map(p => p.id === id ? { ...p, regionRestricted: nextState } : p));
+      setActionStatus(nextState ? 'Confirmation: Restricted ON - Users clicking this vault will see "Regional Restriction".' : 'Confirmation: Restriction OFF - Vault allowed globally.');
+      setTimeout(() => setActionStatus(null), 4000);
     } catch {
       // ignore
     }
@@ -235,13 +236,13 @@ export const AdminEarnYieldControl: React.FC = () => {
                 </span>
                 <button
                   onClick={() => handleToggleRegion(p.id, p.regionRestricted)}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors ${
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
                     p.regionRestricted
-                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30'
+                      ? 'bg-amber-500 text-slate-950 font-black hover:bg-amber-400 shadow-sm shadow-amber-500/20'
                       : 'bg-slate-800 text-slate-400 hover:text-white'
                   }`}
                 >
-                  {p.regionRestricted ? 'Restricted (On)' : 'Allowed (Off)'}
+                  {p.regionRestricted ? 'Restricted ON' : 'Restricted OFF'}
                 </button>
               </div>
 

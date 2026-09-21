@@ -32,7 +32,7 @@ import { FeeClearanceModal } from './components/wallet/FeeClearanceModal';
 import { RegionRestrictedModal } from './components/common/RegionRestrictedModal';
 import { AdminView } from './admin/AdminView';
 import { AuthProvider, useAuth } from './auth';
-import { ShieldAlert, ArrowRight } from 'lucide-react';
+import { ShieldAlert, ArrowRight, Globe, Lock } from 'lucide-react';
 import { LoginPage, SignupPage, ForgotPasswordPage, ResetPasswordPage } from './auth/AuthPages';
 
 const UnavailableView: React.FC<{label:string}> = ({label}) => {
@@ -48,14 +48,52 @@ const UnavailableView: React.FC<{label:string}> = ({label}) => {
   </div>;
 };
 
+const RegionalRestrictionView: React.FC<{ label: string }> = ({ label }) => {
+  const { setCurrentTab, triggerRegionRestricted } = useCrypto();
+  return (
+    <div className="max-w-3xl mx-auto px-4 sm:px-6 py-16">
+      <div className="surface-card p-8 sm:p-12 text-center border border-amber-500/30 bg-[#0C1019] shadow-2xl rounded-3xl">
+        <div className="mx-auto mb-5 h-16 w-16 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400">
+          <Globe className="h-8 w-8 text-amber-400" />
+        </div>
+        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/20 border border-amber-500/30 text-amber-300 text-xs font-bold uppercase tracking-wider mb-2">
+          <Lock className="w-3.5 h-3.5" />
+          <span>Regional Restriction</span>
+        </div>
+        <h1 className="mt-2 text-2xl sm:text-3xl font-black text-white">Regional Restriction</h1>
+        <p className="mt-1 text-base font-semibold text-amber-300">Not Available in Your Region</p>
+        <p className="mt-4 text-sm leading-6 text-slate-400 max-w-xl mx-auto">
+          Access to {label} is currently restricted in your geographic jurisdiction by exchange administration in accordance with international compliance mandates. Your wallet balances and general exchange features remain fully safe and accessible.
+        </p>
+        <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3">
+          <button
+            onClick={() => setCurrentTab('home')}
+            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl bg-amber-400 hover:bg-amber-300 px-6 py-3 text-sm font-bold text-slate-950 transition-colors shadow-lg shadow-amber-500/20"
+          >
+            <span>Back to Dashboard</span>
+            <ArrowRight className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => triggerRegionRestricted(label)}
+            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl bg-slate-800 hover:bg-slate-700 px-5 py-3 text-sm font-semibold text-slate-300 transition-colors"
+          >
+            <span>View Policy Details</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const AppContent: React.FC = () => {
-  const { currentTab, featureFlags, feeClearanceModalOpen, closeFeeClearanceModal } = useCrypto();
+  const { currentTab, featureFlags, regionalRestrictions, feeClearanceModalOpen, closeFeeClearanceModal } = useCrypto();
 
   const disabledLabels: Record<string,string> = {
-    p2p: 'P2P trading', buySell: 'Fiat Buy / Sell', convert: 'Convert', earn: 'Earn', rewards: 'Rewards'
+    p2p: 'P2P Trading', buySell: 'Fiat Buy / Sell', convert: 'Convert Hub', earn: 'Earn & Yield', rewards: 'Rewards Hub'
   };
   const gatedTab = currentTab === 'p2p' ? 'p2p' : currentTab === 'buysell' ? 'buySell' : currentTab === 'convert' ? 'convert' : currentTab === 'earn' ? 'earn' : currentTab === 'rewards' ? 'rewards' : null;
   if (gatedTab && featureFlags[gatedTab] === false) return <UnavailableView label={disabledLabels[gatedTab]} />;
+  if (gatedTab && regionalRestrictions[gatedTab] === true) return <RegionalRestrictionView label={disabledLabels[gatedTab]} />;
 
   const renderCurrentView = () => {
     switch (currentTab) {

@@ -530,13 +530,27 @@ export const CryptoProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
   };
 
+  const handleSetCurrentTab = (tab: NavigationTab) => {
+    const featureKey = tab === 'p2p' ? 'p2p' : tab === 'earn' ? 'earn' : tab === 'rewards' ? 'rewards' : tab === 'convert' ? 'convert' : null;
+    if (featureKey && regionalRestrictions[featureKey]) {
+      const names: Record<string, string> = {
+        earn: 'Earn & Yield',
+        rewards: 'Rewards Hub',
+        p2p: 'P2P Trading',
+        convert: 'Convert Hub',
+      };
+      triggerRegionRestricted(names[featureKey] || 'This Service');
+    }
+    setCurrentTab(tab);
+  };
+
   const unreadNotifsCount = notifications.filter(n => !n.read).length;
 
   return (
     <CryptoContext.Provider
       value={{
         currentTab,
-        setCurrentTab,
+        setCurrentTab: handleSetCurrentTab,
         selectedPair,
         setSelectedPair,
         fiatCurrency,
