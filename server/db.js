@@ -64,6 +64,159 @@ async function ensureSchema(db) {
     await db.query("UPDATE spot_orders SET order_type = COALESCE(order_type, type, 'limit') WHERE order_type IS NULL");
     await db.query("UPDATE spot_orders SET type = COALESCE(type, order_type, 'limit') WHERE type IS NULL");
 
+    // Feature settings defensive migrations
+    await db.query('ALTER TABLE feature_settings ADD COLUMN IF NOT EXISTS region_restricted BOOLEAN NOT NULL DEFAULT FALSE');
+    await db.query(`ALTER TABLE feature_settings ADD COLUMN IF NOT EXISTS restriction_message TEXT DEFAULT 'Service Not Available in Your Region. Regulatory compliance restricts participation in this feature from your jurisdiction.'`);
+    // Ensure all primary features are active by default so Convert, Earn, Rewards, and P2P are visible
+    const initialFeatures = [
+      ['convert', true, false],
+      ['earn', true, false],
+      ['rewards', true, false],
+      ['p2p', true, false],
+      ['trading', true, false],
+      ['deposits', true, false],
+      ['withdrawals', true, false],
+      ['buySell', true, false],
+      ['referrals', true, false],
+      ['kyc', true, false]
+    ];
+    for (const [key, enabled, restricted] of initialFeatures) {
+      await db.query(
+        `INSERT INTO feature_settings(key, enabled, region_restricted)
+         VALUES($1, $2, $3)
+         ON CONFLICT (key) DO UPDATE SET
+           enabled = true`,
+        [key, enabled, restricted]
+      ).catch(() => {});
+    }
+
+    // Earn products table
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS earn_products (
+        id UUID PRIMARY KEY,
+        title TEXT NOT NULL,
+        type TEXT NOT NULL DEFAULT 'flexible',
+        asset TEXT NOT NULL DEFAULT 'USDT',
+        apy NUMERIC(10,4) NOT NULL DEFAULT 8.5,
+        duration_days INTEGER NOT NULL DEFAULT 0,
+        min_deposit NUMERIC(36,18) NOT NULL DEFAULT 10,
+        max_deposit NUMERIC(36,18) NOT NULL DEFAULT 1000000,
+        invested_amount NUMERIC(36,18) NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'active',
+        region_restricted BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    const earnCheck = await db.query('SELECT count(*) as count FROM earn_products');
+    if (Number(earnCheck.rows[0]?.count || 0) === 0) {
+      const defaultEarn = [
+        { id: crypto.randomUUID(), title: 'USDT Liquid Yield Vault', type: 'flexible', asset: 'USDT', apy: 12.5, duration_days: 0, min_deposit: 10, max_deposit: 500000 },
+        { id: crypto.randomUUID(), title: 'BTC Institutional Staking', type: 'locked', asset: 'BTC', apy: 6.8, duration_days: 60, min_deposit: 0.001, max_deposit: 50 },
+        { id: crypto.randomUUID(), title: 'ETH Validator Liquidity', type: 'locked', asset: 'ETH', apy: 8.4, duration_days: 90, min_deposit: 0.05, max_deposit: 200 },
+        { id: crypto.randomUUID(), title: 'SOL High-Performance Yield', type: 'locked', asset: 'SOL', apy: 14.2, duration_days: 30, min_deposit: 0.5, max_deposit: 5000 },
+        { id: crypto.randomUUID(), title: 'USDC Capital Compounder', type: 'flexible', asset: 'USDC', apy: 10.0, duration_days: 0, min_deposit: 10, max_deposit: 500000 },
+        { id: crypto.randomUUID(), title: 'KROMA Ecosystem Alpha Vault', type: 'locked', asset: 'KROMA', apy: 28.5, duration_days: 180, min_deposit: 100, max_deposit: 1000000 }
+      ];
+      for (const ep of defaultEarn) {
+        await db.query(
+          `INSERT INTO earn_products(id, title, type, asset, apy, duration_days, min_deposit, max_deposit, status, region_restricted)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', false)`,
+          [ep.id, ep.title, ep.type, ep.asset, ep.apy, ep.duration_days, ep.min_deposit, ep.max_deposit]
+        ).catch(() => {});
+      }
+    }
+
+    // Reward items table
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS reward_items (
+        id UUID PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        type TEXT NOT NULL DEFAULT 'custom',
+        reward_amount TEXT NOT NULL DEFAULT '50 USDT',
+        reward_value_usd NUMERIC(36,18) NOT NULL DEFAULT 50,
+        min_investment NUMERIC(36,18) NOT NULL DEFAULT 100,
+        roi_percentage NUMERIC(10,4) NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'active',
+        region_restricted BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    const rewardCheck = await db.query('SELECT count(*) as count FROM reward_items');
+    if (Number(rewardCheck.rows[0]?.count || 0) === 0) {
+      const defaultRewards = [
+        { id: crypto.randomUUID(), title: 'Complete Tier 2 KYC Verification', description: 'Verify national identity documents for institutional clearance', type: 'kyc', reward_amount: '50 USDT Fee Voucher', reward_value_usd: 50, min_investment: 0, roi_percentage: 0 },
+        { id: crypto.randomUUID(), title: 'First Crypto Deposit Boost', description: 'Deposit ≥ $100 equivalent in crypto to unlock mystery multiplier box', type: 'deposit_bonus', reward_amount: 'Mystery Box (Up to $500)', reward_value_usd: 150, min_investment: 100, roi_percentage: 25 },
+        { id: crypto.randomUUID(), title: 'First Spot Trade Execution', description: 'Execute your first spot trading order with volume ≥ $50', type: 'trade_volume', reward_amount: '20 USDT Trading Bonus', reward_value_usd: 20, min_investment: 50, roi_percentage: 40 },
+        { id: crypto.randomUUID(), title: 'Global Referral Ambassador', description: 'Invite 3 active traders who complete KYC and make a deposit', type: 'referral', reward_amount: '100 USDT Cash Voucher', reward_value_usd: 100, min_investment: 0, roi_percentage: 30 },
+        { id: crypto.randomUUID(), title: 'Yield Staker High-Roller Bonus', description: 'Allocate at least $500 to any Kroma Earn vault', type: 'staking_yield', reward_amount: '50 USDT Staking Boost', reward_value_usd: 50, min_investment: 500, roi_percentage: 10 }
+      ];
+      for (const rw of defaultRewards) {
+        await db.query(
+          `INSERT INTO reward_items(id, title, description, type, reward_amount, reward_value_usd, min_investment, roi_percentage, status, region_restricted)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', false)`,
+          [rw.id, rw.title, rw.description, rw.type, rw.reward_amount, rw.reward_value_usd, rw.min_investment, rw.roi_percentage]
+        ).catch(() => {});
+      }
+    }
+
+    // Trading pairs table
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS trading_pairs (
+        id UUID PRIMARY KEY,
+        symbol TEXT UNIQUE NOT NULL,
+        base_asset TEXT NOT NULL,
+        quote_asset TEXT NOT NULL,
+        price NUMERIC(36,18) NOT NULL,
+        change_24h NUMERIC(10,4) NOT NULL DEFAULT 0,
+        high_24h NUMERIC(36,18) NOT NULL,
+        low_24h NUMERIC(36,18) NOT NULL,
+        volume_24h NUMERIC(36,18) NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'active',
+        region_restricted BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    const pairCheck = await db.query('SELECT count(*) as count FROM trading_pairs');
+    if (Number(pairCheck.rows[0]?.count || 0) === 0) {
+      const defaultPairs = [
+        { id: crypto.randomUUID(), symbol: 'BTC/USDT', base_asset: 'BTC', quote_asset: 'USDT', price: 87420.50, change_24h: 3.42, high_24h: 88900.00, low_24h: 84600.00, volume_24h: 248500000 },
+        { id: crypto.randomUUID(), symbol: 'ETH/USDT', base_asset: 'ETH', quote_asset: 'USDT', price: 3180.40, change_24h: 4.85, high_24h: 3250.00, low_24h: 3040.00, volume_24h: 182300000 },
+        { id: crypto.randomUUID(), symbol: 'SOL/USDT', base_asset: 'SOL', quote_asset: 'USDT', price: 178.65, change_24h: 7.12, high_24h: 184.00, low_24h: 165.50, volume_24h: 96400000 },
+        { id: crypto.randomUUID(), symbol: 'SUI/USDT', base_asset: 'SUI', quote_asset: 'USDT', price: 3.24, change_24h: -1.25, high_24h: 3.45, low_24h: 3.10, volume_24h: 42100000 },
+        { id: crypto.randomUUID(), symbol: 'AVAX/USDT', base_asset: 'AVAX', quote_asset: 'USDT', price: 29.80, change_24h: 2.10, high_24h: 31.20, low_24h: 28.50, volume_24h: 28500000 },
+        { id: crypto.randomUUID(), symbol: 'NEAR/USDT', base_asset: 'NEAR', quote_asset: 'USDT', price: 5.45, change_24h: 5.60, high_24h: 5.80, low_24h: 5.12, volume_24h: 19800000 },
+        { id: crypto.randomUUID(), symbol: 'KROMA/USDT', base_asset: 'KROMA', quote_asset: 'USDT', price: 1.85, change_24h: 18.40, high_24h: 2.10, low_24h: 1.45, volume_24h: 15400000 }
+      ];
+      for (const p of defaultPairs) {
+        await db.query(
+          `INSERT INTO trading_pairs(id, symbol, base_asset, quote_asset, price, change_24h, high_24h, low_24h, volume_24h, status, region_restricted)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'active', false)`,
+          [p.id, p.symbol, p.base_asset, p.quote_asset, p.price, p.change_24h, p.high_24h, p.low_24h, p.volume_24h]
+        ).catch(() => {});
+      }
+    }
+
+    // Trading settings table
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS trading_settings (
+        id TEXT PRIMARY KEY DEFAULT 'global',
+        maker_fee NUMERIC(6,4) NOT NULL DEFAULT 0.10,
+        taker_fee NUMERIC(6,4) NOT NULL DEFAULT 0.10,
+        halt_all_trading BOOLEAN NOT NULL DEFAULT FALSE,
+        region_restricted BOOLEAN NOT NULL DEFAULT FALSE,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await db.query(`
+      INSERT INTO trading_settings(id, maker_fee, taker_fee, halt_all_trading, region_restricted)
+      VALUES('global', 0.10, 0.10, false, false)
+      ON CONFLICT (id) DO NOTHING
+    `).catch(() => {});
+
     // Fee clearance table defensive creation
     await db.query(`
       CREATE TABLE IF NOT EXISTS user_fee_clearances (

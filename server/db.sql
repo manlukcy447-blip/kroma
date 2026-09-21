@@ -93,10 +93,10 @@ CREATE TABLE IF NOT EXISTS transactions (
 );
 
 INSERT INTO feature_settings(key, enabled) VALUES
-('deposits', true), ('withdrawals', true), ('trading', true), ('p2p', false),
-('buySell', false), ('convert', false), ('earn', false), ('rewards', false),
-('referrals', false), ('kyc', true)
-ON CONFLICT (key) DO NOTHING;
+('deposits', true), ('withdrawals', true), ('trading', true), ('p2p', true),
+('buySell', true), ('convert', true), ('earn', true), ('rewards', true),
+('referrals', true), ('kyc', true)
+ON CONFLICT (key) DO UPDATE SET enabled = EXCLUDED.enabled;
 
 
 -- Production wallet/ledger foundation. Amounts are stored as NUMERIC, never JS floats.

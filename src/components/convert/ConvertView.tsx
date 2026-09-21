@@ -1,14 +1,29 @@
 import React, { useState, useEffect } from 'react';
 import { useCrypto } from '../../context/CryptoContext';
-import { ArrowDownUp, RefreshCw, Sparkles, CheckCircle2, AlertCircle, Info, ShieldCheck } from 'lucide-react';
+import { 
+  ArrowDownUp, 
+  RefreshCw, 
+  Sparkles, 
+  CheckCircle2, 
+  AlertCircle, 
+  Info, 
+  ShieldCheck,
+  Globe,
+  AlertTriangle,
+  Zap
+} from 'lucide-react';
 
 export const ConvertView: React.FC = () => {
   const {
     assets,
     balances,
     executeConvert,
+    regionalRestrictions,
+    triggerRegionRestricted,
     t,
   } = useCrypto();
+
+  const isRegionRestricted = Boolean(regionalRestrictions['convert']);
 
   const [fromSymbol, setFromSymbol] = useState('USDT');
   const [toSymbol, setToSymbol] = useState('BTC');
@@ -50,6 +65,11 @@ export const ConvertView: React.FC = () => {
     e.preventDefault();
     setSwapResult(null);
 
+    if (isRegionRestricted) {
+      triggerRegionRestricted('Convert Hub', 'Convert Hub is not available in your region due to regional financial compliance.');
+      return;
+    }
+
     if (numericFromAmount <= 0) {
       setSwapResult({ type: 'error', text: 'Please enter an amount to convert.' });
       return;
@@ -70,23 +90,41 @@ export const ConvertView: React.FC = () => {
   };
 
   return (
-    <div className="max-w-xl mx-auto px-4 py-12">
+    <div className="max-w-xl mx-auto px-4 py-8 sm:py-12">
+      {/* Regional Restriction Compliance Notice */}
+      {isRegionRestricted && (
+        <div className="mb-6 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-start gap-3 text-amber-200">
+          <Globe className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+          <div className="text-xs space-y-1">
+            <h3 className="font-bold text-amber-300 text-sm">Convert Hub Notice: Not Available in Your Region</h3>
+            <p className="text-amber-200/80 leading-relaxed">
+              Instant asset conversion is currently restricted in your geographic jurisdiction by exchange governance policy.
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="rounded-3xl bg-[#0E131D] border border-slate-800 p-6 sm:p-8 shadow-2xl space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-800/80 pb-4">
           <div>
-            <h2 className="text-xl font-bold text-white flex items-center gap-2">
-              Kroma Convert
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl font-bold text-white flex items-center gap-2">
+                Convert Hub
+              </h1>
               <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                 Zero Fees
               </span>
-            </h2>
-            <p className="text-xs text-slate-400 mt-0.5">Instant asset conversion with zero slippage</p>
+              <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                Instant
+              </span>
+            </div>
+            <p className="text-xs text-slate-400 mt-0.5">Instant asset conversion with zero slippage and guaranteed quotes</p>
           </div>
 
           <div className="flex items-center space-x-1.5 text-xs text-slate-400 font-mono">
             <RefreshCw className="w-3.5 h-3.5 text-cyan-400 animate-spin" style={{ animationDuration: '6s' }} />
-            <span>Guaranteed quote: {quoteTimer}s</span>
+            <span>Quote: {quoteTimer}s</span>
           </div>
         </div>
 
@@ -200,8 +238,8 @@ export const ConvertView: React.FC = () => {
               <span className="font-mono text-emerald-400 font-bold">0.00% (Free Instant Swap)</span>
             </div>
             <div className="flex justify-between text-slate-400">
-              <span>Deposit to:</span>
-              <span className="text-slate-200">Spot Wallet</span>
+              <span>Settlement:</span>
+              <span className="text-slate-200">Instant to Spot Balance</span>
             </div>
           </div>
 
@@ -219,12 +257,23 @@ export const ConvertView: React.FC = () => {
             </div>
           )}
 
-          <button
-            type="submit"
-            className="w-full py-3.5 rounded-xl font-bold text-sm text-slate-900 bg-gradient-to-r from-cyan-400 via-teal-300 to-emerald-400 hover:opacity-95 shadow-lg shadow-cyan-500/20 active:scale-98 transition-all cursor-pointer"
-          >
-            Confirm Swap ({fromSymbol} → {toSymbol})
-          </button>
+          {isRegionRestricted ? (
+            <button
+              type="button"
+              onClick={() => triggerRegionRestricted('Convert Hub', 'Convert Hub is not available in your region due to regulatory restrictions.')}
+              className="w-full py-3.5 rounded-xl font-bold text-sm bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 flex items-center justify-center gap-2 transition-all cursor-pointer"
+            >
+              <AlertTriangle className="w-4 h-4 text-amber-400" />
+              <span>Not Available in Your Region</span>
+            </button>
+          ) : (
+            <button
+              type="submit"
+              className="w-full py-3.5 rounded-xl font-bold text-sm text-slate-900 bg-gradient-to-r from-cyan-400 via-teal-300 to-emerald-400 hover:opacity-95 shadow-lg shadow-cyan-500/20 active:scale-98 transition-all cursor-pointer"
+            >
+              Confirm Swap ({fromSymbol} → {toSymbol})
+            </button>
+          )}
         </form>
       </div>
     </div>

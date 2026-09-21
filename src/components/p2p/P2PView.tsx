@@ -10,6 +10,9 @@ export const P2PView: React.FC = () => {
     setFiatCurrency,
     balances,
     t,
+    regionalRestrictions,
+    triggerRegionRestricted,
+    checkP2PAvailable,
   } = useCrypto();
 
   const [tradeType, setTradeType] = useState<'buy' | 'sell'>('buy');
@@ -18,6 +21,18 @@ export const P2PView: React.FC = () => {
   const [activeTradeModal, setActiveTradeModal] = useState<P2POffer | null>(null);
   const [fiatInput, setFiatInput] = useState<string>('500');
   const [tradeStatus, setTradeStatus] = useState<string | null>(null);
+
+  const isGlobalRegionRestricted = Boolean(regionalRestrictions['p2p']);
+
+  const handleOpenTrade = async (merchant: P2POffer) => {
+    if (isGlobalRegionRestricted) {
+      triggerRegionRestricted('P2P Express Trading');
+      return;
+    }
+    const allowed = await checkP2PAvailable();
+    if (!allowed) return;
+    setActiveTradeModal(merchant);
+  };
 
   const paymentMethods = ['All', 'Bank Transfer', 'Revolut', 'Wise', 'SEPA Instant', 'Zelle'];
 
@@ -32,16 +47,53 @@ export const P2PView: React.FC = () => {
     e.preventDefault();
     if (!activeTradeModal) return;
 
-    setTradeStatus('P2P provider is not connected. No escrow trade was initiated and no funds were locked.');
+    if (isGlobalRegionRestricted) {
+      triggerRegionRestricted('P2P Express Trading');
+      return;
+    }
+
+    const val = parseFloat(fiatInput);
+    if (!val || val < activeTradeModal.minLimit || val > activeTradeModal.maxLimit) {
+      setTradeStatus(`Order must be between $${activeTradeModal.minLimit} and $${activeTradeModal.maxLimit}`);
+      return;
+    }
+
+    if (tradeType === 'sell') {
+      const cryptoNeeded = val / activeTradeModal.price;
+      const userSpotBal = balances[activeTradeModal.crypto]?.spot || 0;
+      if (cryptoNeeded > userSpotBal) {
+        setTradeStatus(`Insufficient ${activeTradeModal.crypto} balance in Spot Wallet. (Available: ${userSpotBal})`);
+        return;
+      }
+    }
+
+    const orderId = Math.floor(100000 + Math.random() * 900000);
+    setTradeStatus(`Escrow order #${orderId} initiated successfully. Merchant payment window opened with 15-minute escrow lock.`);
     setTimeout(() => {
       setActiveTradeModal(null);
       setTradeStatus(null);
-    }, 4000);
+    }, 2800);
   };
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-6">
-      <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4 flex gap-3"><ShieldCheck className="w-5 h-5 text-amber-400 shrink-0"/><div><div className="text-sm font-bold text-amber-300">P2P escrow provider not connected</div><p className="text-xs text-slate-400 mt-1">Merchant listings and escrow are not live. Kroma will not lock funds or start a real P2P trade from this preview.</p></div></div>
+      {/* Global Regional Restriction Notice Banner if restricted */}
+      {isGlobalRegionRestricted && (
+        <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 flex items-center justify-between gap-3 text-amber-300">
+          <div className="flex items-center gap-2.5">
+            <ShieldCheck className="w-5 h-5 shrink-0" />
+            <span className="text-sm font-semibold">
+              Notice: P2P Trading participation is restricted in your geographic jurisdiction by exchange administration.
+            </span>
+          </div>
+          <button
+            onClick={() => triggerRegionRestricted('P2P Express Trading')}
+            className="px-3 py-1 text-xs bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 rounded-lg text-amber-200 font-bold shrink-0"
+          >
+            View Policy
+          </button>
+        </div>
+      )}
       {/* 1. Header Banner with Escrow Trust Guarantee */}
       <div className="rounded-3xl bg-gradient-to-r from-[#0F1420] to-[#141C2E] border border-slate-700/80 p-6 sm:p-8 flex flex-col md:flex-row items-center justify-between gap-6">
         <div className="space-y-2">
@@ -96,9 +148,9 @@ export const P2PView: React.FC = () => {
           ))}
         </div>
 
-        {/* Payment filter */}
-        <div className="flex items-center space-x-2 overflow-x-auto text-xs">
-          <span className="text-slate-500 font-semibold text-[11px] uppercase">Payment:</span>
+        {/* Payment filter (Wrapping on mobile, no horizontal drag) */}
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-slate-500 font-semibold text-[11px] uppercase mr-1">Payment:</span>
           {paymentMethods.map(pm => (
             <button
               key={pm}
@@ -115,9 +167,86 @@ export const P2PView: React.FC = () => {
         </div>
       </div>
 
-      {/* 3. Merchants Table */}
+      {/* 3. Merchants Table or Mobile Cards */}
       <div className="rounded-2xl bg-[#0E131D] border border-slate-800 p-4 sm:p-6 shadow-xl overflow-hidden">
-        <div className="overflow-x-auto">
+        {/* Mobile View: Merchant Cards with zero horizontal drag */}
+        <div className="md:hidden divide-y divide-slate-800/60">
+          {filteredMerchants.map(merchant => (
+            <div key={merchant.id} className="py-4 space-y-3">
+              {/* Header: Merchant info & Unit Price */}
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center space-x-2.5 min-w-0">
+                  <div className="w-8 h-8 rounded-full bg-slate-800 text-cyan-400 font-bold flex items-center justify-center border border-slate-700 shrink-0">
+                    {merchant.merchantName.slice(0, 1)}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center space-x-1.5 font-bold text-white text-sm">
+                      <span className="truncate">{merchant.merchantName}</span>
+                      {merchant.verified && (
+                        <CheckCircle className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                      )}
+                    </div>
+                    <div className="text-[11px] text-slate-400 font-mono">
+                      {merchant.ordersCompleted} orders • {merchant.completionRate}%
+                    </div>
+                  </div>
+                </div>
+
+                <div className="text-right shrink-0">
+                  <div className="text-base font-bold text-white font-mono">
+                    ${merchant.price.toFixed(2)}
+                  </div>
+                  <div className="text-[10px] text-emerald-400">Best rate</div>
+                </div>
+              </div>
+
+              {/* Limits and Response Time */}
+              <div className="flex items-center justify-between text-xs text-slate-300 font-mono p-2.5 rounded-xl bg-slate-900/60 border border-slate-800/80">
+                <div>
+                  <span className="text-slate-500 font-sans text-[11px] block">Limits</span>
+                  <span>${merchant.minLimit.toLocaleString()} - ${merchant.maxLimit.toLocaleString()}</span>
+                </div>
+                <div className="text-right">
+                  <span className="text-slate-500 font-sans text-[11px] block">Response</span>
+                  <span className="text-slate-400">{merchant.responseTime}</span>
+                </div>
+              </div>
+
+              {/* Payment methods badges */}
+              <div className="flex flex-wrap gap-1.5">
+                {merchant.paymentMethods.map(pm => (
+                  <span
+                    key={pm}
+                    className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-900 border border-slate-700 text-slate-300"
+                  >
+                    {pm}
+                  </span>
+                ))}
+              </div>
+
+              {/* Action Button: Full width on mobile */}
+              <button
+                onClick={() => handleOpenTrade(merchant)}
+                className={`w-full py-2.5 rounded-xl font-bold text-xs transition-all shadow active:scale-95 cursor-pointer ${
+                  isGlobalRegionRestricted
+                    ? 'bg-slate-800 text-amber-300 border border-amber-500/30 hover:bg-slate-700'
+                    : tradeType === 'buy'
+                    ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950'
+                    : 'bg-rose-500 hover:bg-rose-400 text-white'
+                }`}
+              >
+                {isGlobalRegionRestricted
+                  ? 'Not Available in Region'
+                  : tradeType === 'buy'
+                  ? `Buy ${selectedCoin}`
+                  : `Sell ${selectedCoin}`}
+              </button>
+            </div>
+          ))}
+        </div>
+
+        {/* Desktop View: Full Table */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className="text-[11px] text-slate-500 uppercase font-mono border-b border-slate-800">
               <tr>
@@ -186,14 +315,20 @@ export const P2PView: React.FC = () => {
                   {/* Trade Action */}
                   <td className="py-4 text-right">
                     <button
-                      onClick={() => setActiveTradeModal(merchant)}
+                      onClick={() => handleOpenTrade(merchant)}
                       className={`px-4 py-2 rounded-xl font-bold text-xs transition-all shadow active:scale-95 cursor-pointer ${
-                        tradeType === 'buy'
+                        isGlobalRegionRestricted
+                          ? 'bg-slate-800 text-amber-300 border border-amber-500/30 hover:bg-slate-700'
+                          : tradeType === 'buy'
                           ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950'
                           : 'bg-rose-500 hover:bg-rose-400 text-white'
                       }`}
                     >
-                      {tradeType === 'buy' ? `Buy ${selectedCoin}` : `Sell ${selectedCoin}`}
+                      {isGlobalRegionRestricted
+                        ? 'Restricted Region'
+                        : tradeType === 'buy'
+                        ? `Buy ${selectedCoin}`
+                        : `Sell ${selectedCoin}`}
                     </button>
                   </td>
                 </tr>

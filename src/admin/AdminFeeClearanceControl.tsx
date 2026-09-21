@@ -404,7 +404,115 @@ export const AdminFeeClearanceControl: React.FC<AdminFeeClearanceControlProps> =
           </h3>
         </div>
 
-        <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/50">
+        {/* Mobile View: Fee Clearance Cards (No horizontal dragging) */}
+        <div className="lg:hidden space-y-3">
+          {feeClearances.length === 0 ? (
+            <div className="p-6 text-center text-slate-500 rounded-xl border border-slate-800 bg-slate-900/50 text-xs">
+              No fee clearance records found. Select a user above to create an individual fee clearance hold.
+            </div>
+          ) : (
+            feeClearances.map(fc => {
+              const isHeld = fc.holdActive;
+              const isSubmitted = fc.status === 'submitted';
+              const isCleared = fc.status === 'cleared';
+
+              return (
+                <div key={fc.userId} className="p-4 rounded-xl border border-slate-800 bg-slate-900/60 space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="font-semibold text-white text-xs">{fc.email}</div>
+                      <div className="text-[10px] text-slate-400 font-mono">
+                        ID: {fc.userId.slice(0, 8)}...
+                      </div>
+                    </div>
+                    <div>
+                      {isHeld ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-500/15 border border-amber-500/40 text-amber-300">
+                          <Lock className="w-3 h-3" /> ON HOLD
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/15 border border-emerald-500/30 text-emerald-400">
+                          <Unlock className="w-3 h-3" /> RELEASED
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 font-mono">
+                    <div>
+                      <span className="text-[10px] text-slate-500 font-sans block">Required Fee</span>
+                      <span className="font-bold text-cyan-300">{fc.feeAmount} {fc.feeAsset}</span>
+                      <span className="text-[10px] text-slate-400 block">{fc.feeNetwork}</span>
+                    </div>
+                    <div className="text-right font-sans">
+                      <span className="text-[10px] text-slate-500 block">Status</span>
+                      {isCleared ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800/40">
+                          <CheckCircle2 className="w-3 h-3" /> Cleared
+                        </span>
+                      ) : isSubmitted ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-950 text-cyan-300 border border-cyan-800/60 animate-pulse">
+                          <Clock className="w-3 h-3" /> Review
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-amber-950 text-amber-400 border border-amber-800/40">
+                          <AlertTriangle className="w-3 h-3" /> Unpaid
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {fc.txHash && (
+                    <div className="text-[11px] font-mono bg-slate-950 p-2 rounded border border-slate-800/70 text-slate-300 break-all">
+                      <span className="text-slate-500 block font-sans text-[10px]">Tx Hash:</span>
+                      {fc.txHash}
+                    </div>
+                  )}
+
+                  {/* Actions */}
+                  <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-800/60">
+                    <button
+                      onClick={() => handleSelectUser(fc.userId)}
+                      className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center gap-1"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                      <span>Edit</span>
+                    </button>
+
+                    {isSubmitted && (
+                      <>
+                        <button
+                          onClick={() => handleApprove(fc.userId)}
+                          className="px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 font-bold text-xs"
+                        >
+                          Approve
+                        </button>
+                        <button
+                          onClick={() => handleReject(fc.userId)}
+                          className="px-3 py-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 font-bold text-xs"
+                        >
+                          Reject
+                        </button>
+                      </>
+                    )}
+
+                    {isHeld && !isSubmitted && (
+                      <button
+                        onClick={() => handleDirectRelease(fc.userId)}
+                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
+                      >
+                        Release Hold
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Desktop View: Full Table */}
+        <div className="hidden lg:block overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/50">
           <table className="w-full text-xs text-left">
             <thead>
               <tr className="border-b border-slate-800 text-slate-400 bg-slate-950/60 font-semibold">

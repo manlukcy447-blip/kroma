@@ -150,8 +150,8 @@ export const SpotTradingView: React.FC = () => {
           </div>
         </div>
 
-        {/* Quick pair switches */}
-        <div className="flex items-center gap-2 overflow-x-auto py-1">
+        {/* Quick pair switches (Wrapping on mobile, no horizontal drag) */}
+        <div className="flex flex-wrap items-center gap-2 py-1">
           {assets.slice(0, 6).map(a => {
             const pairName = `${a.symbol}/USDT`;
             const isActive = selectedPair === pairName;
@@ -253,38 +253,67 @@ export const SpotTradingView: React.FC = () => {
             {orders.length === 0 ? (
               <div className="py-8 text-center text-xs text-slate-500">No open orders for this account.</div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs font-mono">
-                  <thead className="text-[11px] text-slate-500 uppercase border-b border-slate-800 font-sans">
-                    <tr>
-                      <th className="pb-2">Pair</th>
-                      <th className="pb-2">Side</th>
-                      <th className="pb-2 text-right">Price</th>
-                      <th className="pb-2 text-right">Amount</th>
-                      <th className="pb-2 text-right font-sans">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/40">
-                    {orders.map(o => (
-                      <tr key={o.id} className="hover:bg-slate-800/30">
-                        <td className="py-2.5 font-bold text-white">{o.pair}</td>
-                        <td className={`py-2.5 font-bold uppercase ${o.side === 'buy' ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {o.side}
-                        </td>
-                        <td className="py-2.5 text-right text-slate-300">${o.price}</td>
-                        <td className="py-2.5 text-right text-slate-300">{o.amount}</td>
-                        <td className="py-2.5 text-right font-sans">
-                          <button
-                            onClick={() => cancelSpotOrder(o.id)}
-                            className="px-2 py-1 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 font-semibold text-[11px]"
-                          >
-                            Cancel
-                          </button>
-                        </td>
+              <div>
+                {/* Mobile Open Order Cards */}
+                <div className="sm:hidden divide-y divide-slate-800/60 font-mono">
+                  {orders.map(o => (
+                    <div key={o.id} className="py-2.5 flex items-center justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-bold text-white text-xs">{o.pair}</span>
+                          <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold uppercase ${o.side === 'buy' ? 'text-emerald-400 bg-emerald-950/60' : 'text-rose-400 bg-rose-950/60'}`}>
+                            {o.side}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-400 mt-0.5">
+                          Price: <span className="text-slate-200">${o.price}</span> • Amt: <span className="text-slate-200">{o.amount}</span>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => cancelSpotOrder(o.id)}
+                        className="px-2.5 py-1 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 font-semibold text-xs transition-colors shrink-0"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Desktop Table */}
+                <div className="hidden sm:block overflow-x-auto">
+                  <table className="w-full text-left text-xs font-mono">
+                    <thead className="text-[11px] text-slate-500 uppercase border-b border-slate-800 font-sans">
+                      <tr>
+                        <th className="pb-2">Pair</th>
+                        <th className="pb-2">Side</th>
+                        <th className="pb-2 text-right">Price</th>
+                        <th className="pb-2 text-right">Amount</th>
+                        <th className="pb-2 text-right font-sans">Action</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/40">
+                      {orders.map(o => (
+                        <tr key={o.id} className="hover:bg-slate-800/30">
+                          <td className="py-2.5 font-bold text-white">{o.pair}</td>
+                          <td className={`py-2.5 font-bold uppercase ${o.side === 'buy' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {o.side}
+                          </td>
+                          <td className="py-2.5 text-right text-slate-300">${o.price}</td>
+                          <td className="py-2.5 text-right text-slate-300">{o.amount}</td>
+                          <td className="py-2.5 text-right font-sans">
+                            <button
+                              onClick={() => cancelSpotOrder(o.id)}
+                              className="px-2 py-1 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 font-semibold text-[11px]"
+                            >
+                              Cancel
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
           </div>

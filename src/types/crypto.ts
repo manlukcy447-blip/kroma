@@ -196,3 +196,53 @@ export interface UserFeeClearance {
   updatedAt?: string | null;
 }
 
+export interface RewardItem {
+  id: string;
+  title: string;
+  description: string;
+  type: string;
+  rewardAmount: string;
+  rewardValueUsd: number;
+  minInvestment: number;
+  roiPercentage: number;
+  status: 'active' | 'paused';
+  regionRestricted: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface TradingPairConfig {
+  id: string;
+  symbol: string;
+  baseAsset: string;
+  quoteAsset: string;
+  price: number;
+  change24h: number;
+  high24h: number;
+  low24h: number;
+  volume24h: number;
+  status: 'active' | 'halted' | 'maintenance';
+  regionRestricted: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface TradingSettingsConfig {
+  makerFee?: number;
+  takerFee?: number;
+  makerFeePercent?: number;
+  takerFeePercent?: number;
+  minOrderSizeUsd?: number;
+  maxSlippagePercent?: number;
+  haltAllTrading: boolean;
+  regionRestricted: boolean;
+}
+
+export interface FeatureSettingItem {
+  key: string;
+  enabled: boolean;
+  regionRestricted: boolean;
+  restrictionMessage?: string;
+  updatedAt?: string;
+}
+

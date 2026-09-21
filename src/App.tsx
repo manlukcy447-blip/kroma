@@ -29,6 +29,7 @@ import { WithdrawModal } from './components/wallet/WithdrawModal';
 import { TransferModal } from './components/wallet/TransferModal';
 import { SendReceiveModal } from './components/wallet/SendReceiveModal';
 import { FeeClearanceModal } from './components/wallet/FeeClearanceModal';
+import { RegionRestrictedModal } from './components/common/RegionRestrictedModal';
 import { AdminView } from './admin/AdminView';
 import { AuthProvider, useAuth } from './auth';
 import { ShieldAlert, ArrowRight } from 'lucide-react';
@@ -39,9 +40,9 @@ const UnavailableView: React.FC<{label:string}> = ({label}) => {
   return <div className="max-w-3xl mx-auto px-4 sm:px-6 py-16">
     <div className="surface-card p-8 sm:p-12 text-center">
       <div className="mx-auto mb-5 h-14 w-14 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center"><ShieldAlert className="h-7 w-7 text-amber-400"/></div>
-      <div className="eyebrow">Provider not connected</div>
-      <h1 className="mt-2 text-2xl sm:text-3xl font-black text-white">{label} is not live yet</h1>
-      <p className="mt-3 text-sm leading-6 text-slate-400 max-w-xl mx-auto">Kroma keeps this feature disabled until the required external provider, liquidity, custody or payment rail is connected. Your wallet balance is not changed by this screen.</p>
+      <div className="eyebrow">Service Temporarily Paused</div>
+      <h1 className="mt-2 text-2xl sm:text-3xl font-black text-white">{label} is Currently Offline</h1>
+      <p className="mt-3 text-sm leading-6 text-slate-400 max-w-xl mx-auto">This service has been temporarily paused by exchange administration for scheduled maintenance or regulatory compliance. All account balances remain secure.</p>
       <button onClick={() => setCurrentTab('home')} className="mt-7 inline-flex items-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-bold text-slate-900 hover:bg-slate-100">Back to dashboard <ArrowRight className="w-4 h-4"/></button>
     </div>
   </div>;
@@ -88,12 +89,12 @@ const AppContent: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#070A10] text-slate-100 flex flex-col selection:bg-cyan-500 selection:text-slate-900 pb-16 md:pb-0">
+    <div className="min-h-screen bg-[#070A10] text-slate-100 flex flex-col selection:bg-cyan-500 selection:text-slate-900 pb-16 md:pb-0 overflow-x-hidden w-full max-w-full">
       {/* Top Main Navigation Bar */}
       <Header />
 
       {/* Main View Router Stage */}
-      <main className="flex-1">
+      <main className="flex-1 w-full max-w-full overflow-x-hidden">
         {renderCurrentView()}
       </main>
 
@@ -103,6 +104,7 @@ const AppContent: React.FC = () => {
       <TransferModal />
       <SendReceiveModal />
       <FeeClearanceModal isOpen={feeClearanceModalOpen} onClose={closeFeeClearanceModal} />
+      <RegionRestrictedModal />
 
       {/* Footer */}
       <Footer />

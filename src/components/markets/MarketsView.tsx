@@ -82,13 +82,13 @@ export const MarketsView: React.FC = () => {
         </div>
       </div>
 
-      {/* Category Pills */}
-      <div className="flex items-center space-x-2 overflow-x-auto pb-2 border-b border-slate-800">
+      {/* Category Pills (Wrapping on mobile, no horizontal drag) */}
+      <div className="flex flex-wrap items-center gap-2 pb-2 border-b border-slate-800">
         {categories.map(cat => (
           <button
             key={cat}
             onClick={() => setCategory(cat)}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
               category === cat
                 ? 'bg-slate-800 text-cyan-400 font-bold border border-cyan-500/40 shadow-sm'
                 : 'bg-slate-900/60 text-slate-400 hover:text-white border border-transparent'
@@ -99,9 +99,97 @@ export const MarketsView: React.FC = () => {
         ))}
       </div>
 
-      {/* Markets Table Card */}
+      {/* Markets Table / Cards Card */}
       <div className="rounded-2xl bg-[#0E131D] border border-slate-800 p-4 sm:p-6 shadow-xl overflow-hidden">
-        <div className="overflow-x-auto">
+        {/* Mobile View: Clean responsive cards with zero horizontal drag */}
+        <div className="md:hidden divide-y divide-slate-800/60 font-mono">
+          {filteredAssets.map(asset => {
+            const isFav = favorites.includes(asset.symbol);
+            const isUp = asset.change24h >= 0;
+
+            return (
+              <div
+                key={asset.symbol}
+                onClick={() => {
+                  setSelectedPair(`${asset.symbol}/USDT`);
+                  setCurrentTab('trade');
+                }}
+                className="py-3.5 space-y-3 cursor-pointer active:bg-slate-800/30 transition-colors"
+              >
+                {/* Header: Favorite, Coin, Symbol, Price, Change */}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center space-x-2.5 min-w-0">
+                    <button
+                      onClick={e => toggleFavorite(asset.symbol, e)}
+                      className={`p-1 rounded shrink-0 transition-colors ${
+                        isFav ? 'text-amber-400' : 'text-slate-600'
+                      }`}
+                    >
+                      <Star className="w-4 h-4 fill-current" />
+                    </button>
+                    <div
+                      className="w-8 h-8 rounded-full flex items-center justify-center text-white font-black text-xs shadow shrink-0"
+                      style={{ backgroundColor: asset.iconBg }}
+                    >
+                      {asset.symbol.slice(0, 3)}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-bold text-white text-sm font-sans truncate">{asset.symbol}</div>
+                      <div className="text-[11px] text-slate-400 font-sans truncate">{asset.name}</div>
+                    </div>
+                  </div>
+
+                  <div className="text-right shrink-0">
+                    <div className="font-bold text-white text-sm">
+                      ${asset.priceUsd.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </div>
+                    <span className={`inline-flex items-center px-1.5 py-0.2 rounded text-[11px] font-bold ${
+                      isUp ? 'text-emerald-400 bg-emerald-950/60' : 'text-rose-400 bg-rose-950/60'
+                    }`}>
+                      {isUp ? '+' : ''}{asset.change24h}%
+                    </span>
+                  </div>
+                </div>
+
+                {/* Metrics row & Actions */}
+                <div className="flex items-center justify-between text-xs font-sans text-slate-400 pt-1">
+                  <div className="flex items-center gap-4 text-[11px]">
+                    <div>
+                      <span className="text-slate-500">24h Vol: </span>
+                      <span className="text-slate-300 font-mono">${(asset.volume24h / 1000000).toFixed(1)}M</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500">MCap: </span>
+                      <span className="text-slate-300 font-mono">${(asset.marketCap / 1000000000).toFixed(1)}B</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                    <button
+                      onClick={() => {
+                        setSelectedPair(`${asset.symbol}/USDT`);
+                        setCurrentTab('trade');
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 font-semibold text-xs transition-colors"
+                    >
+                      Trade
+                    </button>
+                    <button
+                      onClick={() => openDepositModal(asset.symbol)}
+                      className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs transition-colors"
+                      title="Deposit asset"
+                    >
+                      <ArrowDownToLine className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Desktop View: Full multi-column sortable table */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className="text-[11px] text-slate-500 uppercase font-mono border-b border-slate-800">
               <tr>

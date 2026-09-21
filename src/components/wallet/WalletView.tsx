@@ -327,13 +327,13 @@ export const WalletView: React.FC = () => {
 
       {/* 2. Navigation Tabs (Overview, Spot, Funding, Earn, History) */}
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-2">
-        <div className="flex items-center space-x-2">
+        <div className="flex flex-wrap items-center gap-2">
           {[
             { id: 'overview', label: 'All Assets' },
             { id: 'spot', label: 'Spot Account' },
             { id: 'funding', label: 'Funding Account' },
             { id: 'earn', label: 'Earn Vault' },
-            { id: 'history', label: `Transaction Records (${transactions.length})` },
+            { id: 'history', label: `History (${transactions.length})` },
           ].map(tab => (
             <button
               key={tab.id}
@@ -378,134 +378,241 @@ export const WalletView: React.FC = () => {
       {/* 3. Assets Table or Transaction History */}
       <div className="rounded-2xl bg-[#0E131D] border border-slate-800 p-4 sm:p-6 shadow-xl">
         {activeSubTab !== 'history' ? (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs font-mono">
-              <thead className="text-[11px] text-slate-500 uppercase border-b border-slate-800 font-sans">
-                <tr>
-                  <th className="pb-3">Coin</th>
-                  <th className="pb-3 text-right">
-                    {activeSubTab === 'spot' ? 'Spot Available' :
-                     activeSubTab === 'funding' ? 'Funding Available' :
-                     activeSubTab === 'earn' ? 'Earn Staked' : 'Total Balance'}
-                  </th>
-                  {activeSubTab === 'overview' && (
-                    <>
-                      <th className="pb-3 text-right">Spot (Avail)</th>
-                      <th className="pb-3 text-right hidden sm:table-cell">In-Order</th>
-                      <th className="pb-3 text-right hidden sm:table-cell">Funding</th>
-                      <th className="pb-3 text-right hidden md:table-cell">Earn</th>
-                    </>
-                  )}
-                  {activeSubTab === 'spot' && (
-                    <th className="pb-3 text-right">In-Order (Locked)</th>
-                  )}
-                  <th className="pb-3 text-right">USD Value</th>
-                  <th className="pb-3 text-right font-sans">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/40">
-                {filteredSymbols.map(symbol => {
-                  const bal = balances[symbol] || { spot: 0, funding: 0, earn: 0, locked: 0 };
-                  const asset = assets.find(a => a.symbol.toUpperCase() === symbol);
-                  const price = getPrice(symbol);
+          <div>
+            {/* Mobile Asset Cards (No horizontal drag, full actions visible) */}
+            <div className="md:hidden divide-y divide-slate-800/60 font-mono">
+              {filteredSymbols.map(symbol => {
+                const bal = balances[symbol] || { spot: 0, funding: 0, earn: 0, locked: 0 };
+                const asset = assets.find(a => a.symbol.toUpperCase() === symbol);
+                const price = getPrice(symbol);
 
-                  const spot = parseFloat(String(bal.spot ?? 0)) || 0;
-                  const funding = parseFloat(String(bal.funding ?? 0)) || 0;
-                  const earn = parseFloat(String(bal.earn ?? 0)) || 0;
-                  const locked = parseFloat(String(bal.locked ?? 0)) || 0;
+                const spot = parseFloat(String(bal.spot ?? 0)) || 0;
+                const funding = parseFloat(String(bal.funding ?? 0)) || 0;
+                const earn = parseFloat(String(bal.earn ?? 0)) || 0;
+                const locked = parseFloat(String(bal.locked ?? 0)) || 0;
 
-                  const totalCoin = spot + funding + earn + locked;
-                  const targetCoin = 
-                    activeSubTab === 'spot' ? spot :
-                    activeSubTab === 'funding' ? funding :
-                    activeSubTab === 'earn' ? earn : totalCoin;
+                const totalCoin = spot + funding + earn + locked;
+                const targetCoin = 
+                  activeSubTab === 'spot' ? spot :
+                  activeSubTab === 'funding' ? funding :
+                  activeSubTab === 'earn' ? earn : totalCoin;
 
-                  const targetUsd = (
-                    activeSubTab === 'spot' ? (spot + locked) :
-                    activeSubTab === 'funding' ? funding :
-                    activeSubTab === 'earn' ? earn : totalCoin
-                  ) * price;
+                const targetUsd = (
+                  activeSubTab === 'spot' ? (spot + locked) :
+                  activeSubTab === 'funding' ? funding :
+                  activeSubTab === 'earn' ? earn : totalCoin
+                ) * price;
 
-                  const decimals = asset?.decimalPlaces && asset.decimalPlaces > 2 ? 4 : 2;
+                const decimals = asset?.decimalPlaces && asset.decimalPlaces > 2 ? 4 : 2;
 
-                  return (
-                    <tr key={symbol} className="hover:bg-slate-800/30 transition-colors">
-                      <td className="py-3.5 font-sans">
-                        <div className="flex items-center space-x-2.5">
-                          <div
-                            className="w-7 h-7 rounded-full flex items-center justify-center text-white font-black text-[11px] shadow shrink-0"
-                            style={{ backgroundColor: asset?.iconBg || '#2775CA' }}
-                          >
-                            {symbol.slice(0, 3)}
-                          </div>
-                          <div>
-                            <span className="font-bold text-white text-sm">{symbol}</span>
-                            <span className="text-[11px] text-slate-400 block">{asset?.name || symbol}</span>
-                          </div>
+                return (
+                  <div key={symbol} className="py-4 space-y-3">
+                    {/* Header: Coin Info & Balances */}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center space-x-2.5 min-w-0">
+                        <div
+                          className="w-8 h-8 rounded-full flex items-center justify-center text-white font-black text-xs shadow shrink-0"
+                          style={{ backgroundColor: asset?.iconBg || '#2775CA' }}
+                        >
+                          {symbol.slice(0, 3)}
                         </div>
-                      </td>
+                        <div className="min-w-0">
+                          <span className="font-bold text-white text-base font-sans block truncate">{symbol}</span>
+                          <span className="text-[11px] text-slate-400 font-sans block truncate">{asset?.name || symbol}</span>
+                        </div>
+                      </div>
 
-                      <td className="py-3.5 text-right font-bold text-white">
-                        {hideBalances ? '••••' : targetCoin.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: decimals })}
-                      </td>
+                      <div className="text-right shrink-0">
+                        <div className="font-bold text-white text-base">
+                          {hideBalances ? '••••' : targetCoin.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: decimals })}
+                        </div>
+                        <div className="text-xs text-slate-400">
+                          {hideBalances ? '••••' : formatFiat(targetUsd)}
+                        </div>
+                      </div>
+                    </div>
 
-                      {activeSubTab === 'overview' && (
-                        <>
-                          <td className="py-3.5 text-right text-slate-200">
-                            {hideBalances ? '••••' : spot.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: decimals })}
-                          </td>
-                          <td className="py-3.5 text-right text-slate-400 hidden sm:table-cell">
+                    {/* Breakdown pill row for Overview */}
+                    {activeSubTab === 'overview' && (
+                      <div className="grid grid-cols-2 gap-2 text-[11px] p-2.5 rounded-xl bg-slate-900/60 border border-slate-800/80">
+                        <div>
+                          <span className="text-slate-500 font-sans">Spot: </span>
+                          <span className="text-slate-300 font-semibold">{hideBalances ? '••••' : spot.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: decimals })}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 font-sans">In-Order: </span>
+                          <span className="text-slate-400">{hideBalances ? '••••' : locked.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: decimals })}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 font-sans">Funding: </span>
+                          <span className="text-slate-300">{hideBalances ? '••••' : funding.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: decimals })}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 font-sans">Earn: </span>
+                          <span className="text-cyan-400">{hideBalances ? '••••' : earn.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: decimals })}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Action Buttons: Prominent and immediately clickable */}
+                    <div className="grid grid-cols-3 gap-2 font-sans pt-1">
+                      <button
+                        onClick={() => openDepositModal(symbol)}
+                        className="py-2 rounded-xl bg-cyan-950/50 hover:bg-cyan-900/70 border border-cyan-800/40 text-cyan-300 font-bold text-xs text-center transition-colors"
+                      >
+                        Deposit
+                      </button>
+                      <button
+                        onClick={() => openWithdrawModal(symbol)}
+                        className="py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold text-xs text-center transition-colors"
+                      >
+                        Withdraw
+                      </button>
+                      <button
+                        onClick={() => {
+                          setSelectedPair(`${symbol}/USDT`);
+                          setCurrentTab('trade');
+                        }}
+                        className="py-2 rounded-xl bg-emerald-950/50 hover:bg-emerald-900/70 border border-emerald-800/40 text-emerald-300 font-bold text-xs text-center transition-colors"
+                      >
+                        Trade
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Desktop Assets Table */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-left text-xs font-mono">
+                <thead className="text-[11px] text-slate-500 uppercase border-b border-slate-800 font-sans">
+                  <tr>
+                    <th className="pb-3">Coin</th>
+                    <th className="pb-3 text-right">
+                      {activeSubTab === 'spot' ? 'Spot Available' :
+                       activeSubTab === 'funding' ? 'Funding Available' :
+                       activeSubTab === 'earn' ? 'Earn Staked' : 'Total Balance'}
+                    </th>
+                    {activeSubTab === 'overview' && (
+                      <>
+                        <th className="pb-3 text-right">Spot (Avail)</th>
+                        <th className="pb-3 text-right hidden sm:table-cell">In-Order</th>
+                        <th className="pb-3 text-right hidden sm:table-cell">Funding</th>
+                        <th className="pb-3 text-right hidden md:table-cell">Earn</th>
+                      </>
+                    )}
+                    {activeSubTab === 'spot' && (
+                      <th className="pb-3 text-right">In-Order (Locked)</th>
+                    )}
+                    <th className="pb-3 text-right">USD Value</th>
+                    <th className="pb-3 text-right font-sans">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/40">
+                  {filteredSymbols.map(symbol => {
+                    const bal = balances[symbol] || { spot: 0, funding: 0, earn: 0, locked: 0 };
+                    const asset = assets.find(a => a.symbol.toUpperCase() === symbol);
+                    const price = getPrice(symbol);
+
+                    const spot = parseFloat(String(bal.spot ?? 0)) || 0;
+                    const funding = parseFloat(String(bal.funding ?? 0)) || 0;
+                    const earn = parseFloat(String(bal.earn ?? 0)) || 0;
+                    const locked = parseFloat(String(bal.locked ?? 0)) || 0;
+
+                    const totalCoin = spot + funding + earn + locked;
+                    const targetCoin = 
+                      activeSubTab === 'spot' ? spot :
+                      activeSubTab === 'funding' ? funding :
+                      activeSubTab === 'earn' ? earn : totalCoin;
+
+                    const targetUsd = (
+                      activeSubTab === 'spot' ? (spot + locked) :
+                      activeSubTab === 'funding' ? funding :
+                      activeSubTab === 'earn' ? earn : totalCoin
+                    ) * price;
+
+                    const decimals = asset?.decimalPlaces && asset.decimalPlaces > 2 ? 4 : 2;
+
+                    return (
+                      <tr key={symbol} className="hover:bg-slate-800/30 transition-colors">
+                        <td className="py-3.5 font-sans">
+                          <div className="flex items-center space-x-2.5">
+                            <div
+                              className="w-7 h-7 rounded-full flex items-center justify-center text-white font-black text-[11px] shadow shrink-0"
+                              style={{ backgroundColor: asset?.iconBg || '#2775CA' }}
+                            >
+                              {symbol.slice(0, 3)}
+                            </div>
+                            <div>
+                              <span className="font-bold text-white text-sm">{symbol}</span>
+                              <span className="text-[11px] text-slate-400 block">{asset?.name || symbol}</span>
+                            </div>
+                          </div>
+                        </td>
+
+                        <td className="py-3.5 text-right font-bold text-white">
+                          {hideBalances ? '••••' : targetCoin.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: decimals })}
+                        </td>
+
+                        {activeSubTab === 'overview' && (
+                          <>
+                            <td className="py-3.5 text-right text-slate-200">
+                              {hideBalances ? '••••' : spot.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: decimals })}
+                            </td>
+                            <td className="py-3.5 text-right text-slate-400 hidden sm:table-cell">
+                              {hideBalances ? '••••' : locked.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: decimals })}
+                            </td>
+                            <td className="py-3.5 text-right text-slate-300 hidden sm:table-cell">
+                              {hideBalances ? '••••' : funding.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: decimals })}
+                            </td>
+                            <td className="py-3.5 text-right text-cyan-400 hidden md:table-cell">
+                              {hideBalances ? '••••' : earn.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: decimals })}
+                            </td>
+                          </>
+                        )}
+
+                        {activeSubTab === 'spot' && (
+                          <td className="py-3.5 text-right text-slate-400">
                             {hideBalances ? '••••' : locked.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: decimals })}
                           </td>
-                          <td className="py-3.5 text-right text-slate-300 hidden sm:table-cell">
-                            {hideBalances ? '••••' : funding.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: decimals })}
-                          </td>
-                          <td className="py-3.5 text-right text-cyan-400 hidden md:table-cell">
-                            {hideBalances ? '••••' : earn.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: decimals })}
-                          </td>
-                        </>
-                      )}
+                        )}
 
-                      {activeSubTab === 'spot' && (
-                        <td className="py-3.5 text-right text-slate-400">
-                          {hideBalances ? '••••' : locked.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: decimals })}
+                        <td className="py-3.5 text-right font-bold text-slate-200">
+                          {hideBalances ? '••••' : formatFiat(targetUsd)}
                         </td>
-                      )}
 
-                      <td className="py-3.5 text-right font-bold text-slate-200">
-                        {hideBalances ? '••••' : formatFiat(targetUsd)}
-                      </td>
-
-                      <td className="py-3.5 text-right font-sans">
-                        <div className="flex justify-end items-center space-x-2">
-                          <button
-                            onClick={() => openDepositModal(symbol)}
-                            className="text-xs text-cyan-400 hover:text-cyan-300 font-semibold px-2.5 py-1 rounded-lg bg-cyan-950/40 hover:bg-cyan-900/60 transition-colors"
-                          >
-                            Deposit
-                          </button>
-                          <button
-                            onClick={() => openWithdrawModal(symbol)}
-                            className="text-xs text-slate-300 hover:text-white font-semibold px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 transition-colors"
-                          >
-                            Withdraw
-                          </button>
-                          <button
-                            onClick={() => {
-                              setSelectedPair(`${symbol}/USDT`);
-                              setCurrentTab('trade');
-                            }}
-                            className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold px-2.5 py-1 rounded-lg bg-emerald-950/40 hover:bg-emerald-900/60 transition-colors"
-                          >
-                            Trade
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                        <td className="py-3.5 text-right font-sans">
+                          <div className="flex justify-end items-center space-x-2">
+                            <button
+                              onClick={() => openDepositModal(symbol)}
+                              className="text-xs text-cyan-400 hover:text-cyan-300 font-semibold px-2.5 py-1 rounded-lg bg-cyan-950/40 hover:bg-cyan-900/60 transition-colors"
+                            >
+                              Deposit
+                            </button>
+                            <button
+                              onClick={() => openWithdrawModal(symbol)}
+                              className="text-xs text-slate-300 hover:text-white font-semibold px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 transition-colors"
+                            >
+                              Withdraw
+                            </button>
+                            <button
+                              onClick={() => {
+                                setSelectedPair(`${symbol}/USDT`);
+                                setCurrentTab('trade');
+                              }}
+                              className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold px-2.5 py-1 rounded-lg bg-emerald-950/40 hover:bg-emerald-900/60 transition-colors"
+                            >
+                              Trade
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         ) : (
           /* Transaction Records Table */
@@ -525,7 +632,120 @@ export const WalletView: React.FC = () => {
               </div>
             </div>
 
-            <div className="overflow-x-auto">
+            {/* Mobile View: Transaction Cards */}
+            <div className="md:hidden divide-y divide-slate-800/60">
+              {transactions.length === 0 ? (
+                <div className="py-8 text-center text-slate-500 font-sans text-xs">
+                  No transactions recorded yet.
+                </div>
+              ) : (
+                transactions.map(tx => {
+                  const isPendingDeposit = tx.type === 'deposit' && (tx.status === 'pending' || tx.status === 'intent');
+                  const isAwaitingApproval = tx.type === 'deposit' && tx.status === 'awaiting_approval';
+                  const isCompleted = tx.status === 'completed';
+
+                  return (
+                    <div key={tx.id} className="py-3.5 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-sans font-bold ${
+                          tx.type === 'deposit' ? 'bg-emerald-950 text-emerald-300 border border-emerald-800/40' :
+                          tx.type === 'withdraw' ? 'bg-rose-950 text-rose-300 border border-rose-800/40' :
+                          tx.type === 'admin_credit' ? 'bg-cyan-950 text-cyan-300 border border-cyan-800/40' :
+                          tx.type === 'swap' ? 'bg-amber-950 text-amber-300 border border-amber-800/40' : 
+                          'bg-slate-800 text-slate-300'
+                        }`}>
+                          {tx.type === 'admin_credit' ? 'Admin Credit' : tx.type.toUpperCase()}
+                        </span>
+
+                        <span className="text-slate-500 text-[11px]">
+                          {new Date(tx.timestamp).toLocaleDateString()} {new Date(tx.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+
+                      <div className="flex items-baseline justify-between">
+                        <div className="font-bold text-white text-base">
+                          {tx.type === 'deposit' || tx.type === 'admin_credit' ? '+' : tx.type === 'withdraw' ? '-' : ''}
+                          {(parseFloat(String(tx.amount ?? 0)) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })} {tx.asset}
+                        </div>
+
+                        <div>
+                          {isCompleted && (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-800/50 inline-flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3" /> Completed
+                            </span>
+                          )}
+
+                          {isAwaitingApproval && (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-950/90 text-cyan-300 border border-cyan-700/60 inline-flex items-center gap-1 shadow-sm">
+                              <Clock className="w-3 h-3 animate-spin text-cyan-400" /> Awaiting Approval
+                            </span>
+                          )}
+
+                          {isPendingDeposit && (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-950/80 text-amber-300 border border-amber-800/50 inline-flex items-center gap-1">
+                              <Clock className="w-3 h-3" /> Action Required
+                            </span>
+                          )}
+
+                          {!isCompleted && !isAwaitingApproval && !isPendingDeposit && (
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              tx.status === 'pending_security' ? 'bg-amber-950/80 text-amber-300 border border-amber-800/50' :
+                              tx.status === 'failed' || tx.status === 'rejected' ? 'bg-rose-950 text-rose-300 border border-rose-800/40' :
+                              'bg-slate-800 text-slate-400'
+                            }`}>
+                              {tx.status === 'pending_security' ? 'Security Review' : tx.status === 'rejected' ? 'Admin Rejected' : tx.status}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[11px] text-slate-400 font-sans">
+                        <div>
+                          <span>Network: </span>
+                          <span className="text-slate-300 font-medium">{tx.network || tx.details || 'Blockchain Network'}</span>
+                        </div>
+                        {parseFloat(String(tx.fee ?? 0)) > 0 && (
+                          <div>
+                            <span>Fee: </span>
+                            <span className="text-slate-300">{tx.fee} {tx.feeAsset || tx.asset}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {tx.txHash && (
+                        <div className="flex items-center justify-between text-[11px] bg-slate-900/60 p-2 rounded-lg border border-slate-800/80">
+                          <span className="text-slate-400 font-mono truncate mr-2">Tx: {tx.txHash.slice(0, 10)}...{tx.txHash.slice(-6)}</span>
+                          <button
+                            onClick={() => copyToClipboard(tx.txHash || '', tx.id)}
+                            className="text-cyan-400 hover:text-cyan-300 shrink-0 flex items-center gap-1 text-[11px]"
+                          >
+                            {copiedId === tx.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                            <span>{copiedId === tx.id ? 'Copied' : 'Copy'}</span>
+                          </button>
+                        </div>
+                      )}
+
+                      {isPendingDeposit && (
+                        <button
+                          onClick={() => {
+                            setConfirmingTx(tx);
+                            setConfirmTxHash(tx.txHash || '');
+                            setConfirmMsg(null);
+                          }}
+                          className="w-full py-2 mt-1 bg-gradient-to-r from-cyan-500 to-teal-400 text-slate-950 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow transition-all active:scale-95"
+                        >
+                          <CheckCircle2 className="w-4 h-4" />
+                          <span>Confirm Payment Submitted</span>
+                        </button>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Desktop View: Full multi-column table */}
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead className="text-[11px] text-slate-500 uppercase border-b border-slate-800 font-sans">
                   <tr>

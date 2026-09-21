@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useCrypto } from '../../context/CryptoContext';
 import { FeeClearanceBanner } from '../wallet/FeeClearanceBanner';
 import { 
@@ -16,7 +16,10 @@ import {
   Eye, 
   EyeOff, 
   RefreshCw, 
-  CheckCircle2 
+  CheckCircle2,
+  Gift,
+  CandlestickChart,
+  Users
 } from 'lucide-react';
 
 export const HomeView: React.FC = () => {
@@ -37,6 +40,18 @@ export const HomeView: React.FC = () => {
   } = useCrypto();
 
   const [marketTab, setMarketTab] = useState<'hot' | 'gainers' | 'losers' | 'volume'>('hot');
+  const [topEarnProducts, setTopEarnProducts] = useState<any[]>([]);
+
+  useEffect(() => {
+    fetch(`${import.meta.env.VITE_API_URL || ''}/api/earn/products`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.products && Array.isArray(data.products)) {
+          setTopEarnProducts(data.products.slice(0, 2));
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Total Portfolio value across all assets and wallets
   const totalUsdValue = (Object.entries(balances) as [string, { spot: number; funding: number; earn: number; locked?: number }][]).reduce((acc, [symbol, bal]) => {
@@ -137,45 +152,225 @@ export const HomeView: React.FC = () => {
 
               <button
                 onClick={() => setCurrentTab('convert')}
-                className="px-4 py-2.5 rounded-xl font-bold text-xs text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 active:scale-98 transition-all flex items-center space-x-2 cursor-pointer"
+                className="px-4 py-2.5 rounded-xl font-bold text-xs text-slate-950 bg-amber-400 hover:bg-amber-300 shadow-md shadow-amber-500/20 active:scale-98 transition-all flex items-center space-x-1.5 cursor-pointer"
               >
-                <RefreshCw className="w-4 h-4 text-amber-400" />
-                <span>{t('convert')}</span>
+                <RefreshCw className="w-4 h-4 text-slate-950" />
+                <span>Convert Hub</span>
+                <span className="text-[10px] bg-slate-950/20 px-1 py-0.2 rounded font-mono font-bold">0% FEE</span>
+              </button>
+
+              <button
+                onClick={() => setCurrentTab('trade')}
+                className="px-4 py-2.5 rounded-xl font-bold text-xs text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 active:scale-98 transition-all flex items-center space-x-1.5 cursor-pointer"
+              >
+                <CandlestickChart className="w-4 h-4 text-cyan-400" />
+                <span>Spot Trade</span>
+                <span className="text-[10px] text-cyan-300 bg-cyan-950 px-1 py-0.2 rounded font-mono">PRO</span>
+              </button>
+
+              <button
+                onClick={() => setCurrentTab('earn')}
+                className="px-4 py-2.5 rounded-xl font-bold text-xs text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 active:scale-98 transition-all flex items-center space-x-1.5 cursor-pointer"
+              >
+                <Percent className="w-4 h-4 text-emerald-400" />
+                <span>Earn &amp; Yield</span>
+                <span className="text-[10px] text-emerald-300 bg-emerald-950/60 px-1 py-0.2 rounded font-mono">14.2%</span>
+              </button>
+
+              <button
+                onClick={() => setCurrentTab('rewards')}
+                className="px-4 py-2.5 rounded-xl font-bold text-xs text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 active:scale-98 transition-all flex items-center space-x-1.5 cursor-pointer"
+              >
+                <Gift className="w-4 h-4 text-purple-400" />
+                <span>Rewards Hub</span>
+                <span className="text-[10px] text-purple-300 bg-purple-950/60 px-1 py-0.2 rounded font-mono">+$500</span>
+              </button>
+
+              <button
+                onClick={() => setCurrentTab('p2p')}
+                className="px-4 py-2.5 rounded-xl font-bold text-xs text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 active:scale-98 transition-all flex items-center space-x-1.5 cursor-pointer"
+              >
+                <Users className="w-4 h-4 text-cyan-400" />
+                <span>P2P Desk</span>
               </button>
             </div>
           </div>
 
-          {/* Right Hero: Earn & Rewards Highlight Card */}
-          <div className="lg:col-span-5 bg-[#090C12]/80 rounded-2xl border border-slate-800 p-5 space-y-4">
+          {/* Right Hero: Live Earn & Rewards Nexus Card */}
+          <div className="lg:col-span-5 bg-[#090C12]/90 rounded-2xl border border-slate-800 p-5 space-y-4 shadow-xl">
             <div className="flex items-center justify-between">
               <span className="flex items-center gap-2 text-xs font-bold text-cyan-300">
-                <Sparkles className="w-4 h-4 text-amber-400" /> Kroma Earn
+                <Sparkles className="w-4 h-4 text-amber-400" /> Kroma High-Yield &amp; Rewards
               </span>
-              <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                Provider pending
+              <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                Live Protocol
               </span>
             </div>
 
             <div className="grid grid-cols-2 gap-3 text-xs">
-              <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-800">
-                <div className="text-slate-400 text-[11px]">USDT Flexible Vault</div>
-                <div className="text-lg font-bold text-emerald-400 font-mono mt-0.5">Not live</div>
-                <div className="text-[10px] text-slate-500">External provider required</div>
-              </div>
-              <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-800">
-                <div className="text-slate-400 text-[11px]">SOL Locked Staking</div>
-                <div className="text-lg font-bold text-cyan-400 font-mono mt-0.5">Not live</div>
-                <div className="text-[10px] text-slate-500">Custody / validator provider required</div>
-              </div>
+              {topEarnProducts.length > 0 ? (
+                topEarnProducts.map((p, idx) => (
+                  <div 
+                    key={p.id || idx}
+                    onClick={() => setCurrentTab('earn')}
+                    className="p-3 rounded-xl bg-slate-900/90 hover:bg-slate-800/80 border border-slate-800 hover:border-emerald-500/40 transition-all cursor-pointer group"
+                  >
+                    <div className="text-slate-400 text-[11px] truncate">{p.title || `${p.asset} Vault`}</div>
+                    <div className="text-xl font-bold text-emerald-400 font-mono mt-0.5 group-hover:scale-105 transition-transform">
+                      {parseFloat(p.apy).toFixed(1)}% <span className="text-[10px] text-emerald-300/80 font-normal">APY</span>
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-1 flex items-center gap-1 text-emerald-400/80 font-semibold truncate">
+                      <CheckCircle2 className="w-3 h-3 shrink-0" /> {p.type === 'flexible' ? 'Daily payout' : `${p.durationDays}D lock`}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <>
+                  <div 
+                    onClick={() => setCurrentTab('earn')}
+                    className="p-3 rounded-xl bg-slate-900/90 hover:bg-slate-800/80 border border-slate-800 hover:border-emerald-500/40 transition-all cursor-pointer group"
+                  >
+                    <div className="text-slate-400 text-[11px]">USDT Liquid Vault</div>
+                    <div className="text-xl font-bold text-emerald-400 font-mono mt-0.5 group-hover:scale-105 transition-transform">12.5% <span className="text-[10px] text-emerald-300/80 font-normal">APY</span></div>
+                    <div className="text-[10px] text-slate-500 mt-1 flex items-center gap-1 text-emerald-400/80 font-semibold">
+                      <CheckCircle2 className="w-3 h-3" /> Daily payout
+                    </div>
+                  </div>
+                  <div 
+                    onClick={() => setCurrentTab('earn')}
+                    className="p-3 rounded-xl bg-slate-900/90 hover:bg-slate-800/80 border border-slate-800 hover:border-cyan-500/40 transition-all cursor-pointer group"
+                  >
+                    <div className="text-slate-400 text-[11px]">SOL High-Yield</div>
+                    <div className="text-xl font-bold text-cyan-400 font-mono mt-0.5 group-hover:scale-105 transition-transform">14.2% <span className="text-[10px] text-cyan-300/80 font-normal">APY</span></div>
+                    <div className="text-[10px] text-slate-500 mt-1 flex items-center gap-1 text-cyan-400/80 font-semibold">
+                      <CheckCircle2 className="w-3 h-3" /> Guaranteed ROI
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
 
-            <button
-              onClick={() => setCurrentTab('earn')}
-              className="w-full py-2.5 rounded-xl font-bold text-xs text-cyan-300 bg-cyan-950/40 hover:bg-cyan-900/50 border border-cyan-800/60 transition-colors flex items-center justify-center space-x-1.5"
-            >
-              <span>View Earn availability</span>
-              <ChevronRight className="w-4 h-4" />
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setCurrentTab('earn')}
+                className="flex-1 py-2.5 rounded-xl font-bold text-xs text-slate-950 bg-cyan-400 hover:bg-cyan-300 transition-colors flex items-center justify-center space-x-1 shadow-md shadow-cyan-500/20"
+              >
+                <Percent className="w-3.5 h-3.5" />
+                <span>Earn &amp; Yield</span>
+              </button>
+
+              <button
+                onClick={() => setCurrentTab('rewards')}
+                className="flex-1 py-2.5 rounded-xl font-bold text-xs text-amber-300 bg-amber-950/40 hover:bg-amber-900/50 border border-amber-500/40 transition-colors flex items-center justify-center space-x-1"
+              >
+                <Gift className="w-3.5 h-3.5 text-amber-400" />
+                <span>Rewards Hub</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 2. Platform Financial Centers Feature Highlights Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Hub 1: Convert */}
+        <div 
+          onClick={() => setCurrentTab('convert')}
+          className="p-5 rounded-2xl bg-[#0E131D] hover:bg-[#131926] border border-slate-800 hover:border-amber-500/50 transition-all cursor-pointer group space-y-3"
+        >
+          <div className="flex items-center justify-between">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center font-bold">
+              <RefreshCw className="w-5 h-5 group-hover:rotate-180 transition-transform duration-500" />
+            </div>
+            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">
+              0% Slippage
+            </span>
+          </div>
+          <div>
+            <h4 className="font-bold text-white text-sm group-hover:text-amber-300 transition-colors">Convert Hub</h4>
+            <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+              Instant zero-fee crypto swaps between BTC, ETH, SOL, and USDT with guaranteed executable rates.
+            </p>
+          </div>
+          <div className="flex items-center text-xs font-bold text-amber-400 group-hover:translate-x-1 transition-transform">
+            <span>Launch Convert</span>
+            <ChevronRight className="w-4 h-4 ml-1" />
+          </div>
+        </div>
+
+        {/* Hub 2: Earn & Yield */}
+        <div 
+          onClick={() => setCurrentTab('earn')}
+          className="p-5 rounded-2xl bg-[#0E131D] hover:bg-[#131926] border border-slate-800 hover:border-emerald-500/50 transition-all cursor-pointer group space-y-3"
+        >
+          <div className="flex items-center justify-between">
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center font-bold">
+              <Percent className="w-5 h-5" />
+            </div>
+            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+              Up to 28.5%
+            </span>
+          </div>
+          <div>
+            <h4 className="font-bold text-white text-sm group-hover:text-emerald-300 transition-colors">Earn &amp; Yield</h4>
+            <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+              Institutional-grade flexible &amp; fixed-term staking vaults with compound daily yield distribution.
+            </p>
+          </div>
+          <div className="flex items-center text-xs font-bold text-emerald-400 group-hover:translate-x-1 transition-transform">
+            <span>Explore Vaults</span>
+            <ChevronRight className="w-4 h-4 ml-1" />
+          </div>
+        </div>
+
+        {/* Hub 3: Rewards Hub */}
+        <div 
+          onClick={() => setCurrentTab('rewards')}
+          className="p-5 rounded-2xl bg-[#0E131D] hover:bg-[#131926] border border-slate-800 hover:border-purple-500/50 transition-all cursor-pointer group space-y-3"
+        >
+          <div className="flex items-center justify-between">
+            <div className="w-10 h-10 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20 flex items-center justify-center font-bold">
+              <Gift className="w-5 h-5" />
+            </div>
+            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-purple-500/10 text-purple-300 border border-purple-500/20">
+              $500 Mystery
+            </span>
+          </div>
+          <div>
+            <h4 className="font-bold text-white text-sm group-hover:text-purple-300 transition-colors">Rewards Hub</h4>
+            <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+              Unlock deposit multiplier bounties, KYC vouchers, spot trading bonuses, and referral tiers.
+            </p>
+          </div>
+          <div className="flex items-center text-xs font-bold text-purple-400 group-hover:translate-x-1 transition-transform">
+            <span>Claim Bonuses</span>
+            <ChevronRight className="w-4 h-4 ml-1" />
+          </div>
+        </div>
+
+        {/* Hub 4: P2P Escrow */}
+        <div 
+          onClick={() => setCurrentTab('p2p')}
+          className="p-5 rounded-2xl bg-[#0E131D] hover:bg-[#131926] border border-slate-800 hover:border-cyan-500/50 transition-all cursor-pointer group space-y-3"
+        >
+          <div className="flex items-center justify-between">
+            <div className="w-10 h-10 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 flex items-center justify-center font-bold">
+              <Users className="w-5 h-5" />
+            </div>
+            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">
+              0% Escrow
+            </span>
+          </div>
+          <div>
+            <h4 className="font-bold text-white text-sm group-hover:text-cyan-300 transition-colors">P2P Escrow Desk</h4>
+            <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+              Peer-to-peer fiat gateway with verified merchants, bank transfer rails, and custodial escrow protection.
+            </p>
+          </div>
+          <div className="flex items-center text-xs font-bold text-cyan-400 group-hover:translate-x-1 transition-transform">
+            <span>Enter Marketplace</span>
+            <ChevronRight className="w-4 h-4 ml-1" />
           </div>
         </div>
       </div>
@@ -293,8 +488,62 @@ export const HomeView: React.FC = () => {
           </button>
         </div>
 
-        {/* Markets Table */}
-        <div className="overflow-x-auto">
+        {/* Mobile View: No horizontal drag, direct tap-to-trade cards */}
+        <div className="sm:hidden divide-y divide-slate-800/60">
+          {displayedAssets.map(asset => {
+            const isUp = asset.change24h >= 0;
+            return (
+              <div 
+                key={asset.symbol} 
+                onClick={() => {
+                  setSelectedPair(`${asset.symbol}/USDT`);
+                  setCurrentTab('trade');
+                }}
+                className="py-3 flex items-center justify-between gap-3 active:bg-slate-800/40 transition-colors cursor-pointer"
+              >
+                <div className="flex items-center space-x-2.5 min-w-0">
+                  <div
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-white font-black text-xs shrink-0"
+                    style={{ backgroundColor: asset.iconBg }}
+                  >
+                    {asset.symbol.slice(0, 3)}
+                  </div>
+                  <div className="truncate">
+                    <div className="font-bold text-white text-sm">{asset.symbol}</div>
+                    <div className="text-[11px] text-slate-400 truncate">{asset.name}</div>
+                  </div>
+                </div>
+
+                <div className="text-right shrink-0">
+                  <div className="font-mono font-bold text-white text-sm">
+                    ${asset.priceUsd.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </div>
+                  <span className={`inline-flex items-center px-1.5 py-0.2 rounded text-[11px] font-mono font-semibold ${
+                    isUp ? 'text-emerald-400 bg-emerald-950/50' : 'text-rose-400 bg-rose-950/50'
+                  }`}>
+                    {isUp ? '+' : ''}{asset.change24h}%
+                  </span>
+                </div>
+
+                <div className="shrink-0">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedPair(`${asset.symbol}/USDT`);
+                      setCurrentTab('trade');
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 font-semibold text-xs transition-colors"
+                  >
+                    Trade
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Desktop View: Full detailed table */}
+        <div className="hidden sm:block overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className="text-[11px] text-slate-500 uppercase font-mono border-b border-slate-800">
               <tr>

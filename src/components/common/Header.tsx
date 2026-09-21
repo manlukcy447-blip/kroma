@@ -75,10 +75,10 @@ export const Header: React.FC = () => {
     { tab: 'home', label: t('home') },
     { tab: 'markets', label: t('markets') },
     { tab: 'trade', label: t('trade'), badge: 'PRO' },
-    { tab: 'convert', label: t('convert') },
+    { tab: 'convert', label: 'Convert Hub' },
     { tab: 'p2p', label: t('p2p') },
-    { tab: 'earn', label: t('earn'), badge: '11.4%' },
-    { tab: 'rewards', label: t('rewards'), badge: 'NEW' },
+    { tab: 'earn', label: 'Earn & Yield', badge: '11.4%' },
+    { tab: 'rewards', label: 'Rewards Hub', badge: 'NEW' },
     { tab: 'wallet', label: t('wallet'), badge: isHoldActive ? 'HOLD' : undefined },
   ];
 
@@ -409,17 +409,6 @@ export const Header: React.FC = () => {
                     <Sparkles className="w-4 h-4 text-amber-400" />
                     <span>Rewards Hub & Referral</span>
                   </button>
-                  <a
-                    href="/admin"
-                    onClick={() => setIsProfileMenuOpen(false)}
-                    className="w-full text-left px-3 py-2 rounded-lg text-cyan-300 hover:bg-cyan-950/40 flex items-center justify-between"
-                  >
-                    <div className="flex items-center space-x-2">
-                      <ShieldCheck className="w-4 h-4 text-cyan-400" />
-                      <span className="font-semibold">Admin Portal (Approvals)</span>
-                    </div>
-                    <ExternalLink className="w-3.5 h-3.5 text-cyan-400/80" />
-                  </a>
                   <button
                     onClick={async () => { setIsProfileMenuOpen(false); await logout(); window.location.href='/login'; }}
                     className="w-full text-left px-3 py-2 rounded-lg text-rose-300 hover:bg-rose-950/30 flex items-center space-x-2"

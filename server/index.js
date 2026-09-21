@@ -601,10 +601,105 @@ app.post('/api/wallet/withdraw', requireUser, async (req,res)=>{
   catch(e){ await client.query('ROLLBACK').catch(()=>{}); if(String(e.message).startsWith('INSUFFICIENT_')) return res.status(400).json({error:`Insufficient ${asset} balance.`}); console.error(e); res.status(500).json({error:'Unable to create withdrawal'}); } finally { client.release(); }
 });
 
+async function checkFeatureAvailable(featureKey) {
+  try {
+    const { rows } = await pool.query('SELECT enabled, region_restricted AS "regionRestricted", restriction_message AS "restrictionMessage" FROM feature_settings WHERE key=$1', [featureKey]);
+    if (!rows[0]) return { enabled: true, regionRestricted: false, message: '' };
+    return {
+      enabled: Boolean(rows[0].enabled),
+      regionRestricted: Boolean(rows[0].regionRestricted),
+      message: rows[0].restrictionMessage || 'Service Not Available in Your Region. Regulatory compliance restricts participation in this feature from your jurisdiction.'
+    };
+  } catch {
+    return { enabled: true, regionRestricted: false, message: '' };
+  }
+}
+
+app.post('/api/wallet/convert', requireUser, async (req, res) => {
+  const fromAsset = String(req.body?.fromAsset || '').trim().toUpperCase();
+  const toAsset = String(req.body?.toAsset || '').trim().toUpperCase();
+  const fromAmount = Number(req.body?.fromAmount);
+  const toAmount = Number(req.body?.toAmount);
+
+  if (!fromAsset || !toAsset || fromAsset === toAsset || !fromAmount || fromAmount <= 0 || !toAmount || toAmount <= 0) {
+    return res.status(400).json({ error: 'Invalid conversion parameters.' });
+  }
+
+  const feat = await checkFeatureAvailable('convert');
+  if (!feat.enabled) {
+    return res.status(403).json({ error: 'Convert is currently offline for scheduled maintenance.' });
+  }
+  if (feat.regionRestricted) {
+    return res.status(403).json({ error: feat.message, regionRestricted: true, feature: 'convert' });
+  }
+
+  const clearance = await getUserFeeClearance(req.user.userId);
+  if (clearance && clearance.holdActive && clearance.status !== 'cleared') {
+    return res.status(403).json({ error: 'Account Balance on Hold pending fee clearance.', feeHold: true });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const swapId = crypto.randomUUID();
+    await changeAvailable(client, req.user.userId, fromAsset, 'spot', -fromAmount, 'swap_out', swapId, { toAsset, toAmount });
+    await changeAvailable(client, req.user.userId, toAsset, 'spot', toAmount, 'swap_in', swapId, { fromAsset, fromAmount });
+    await client.query(
+      `INSERT INTO transactions(id, user_id, type, asset, amount, status, network)
+       VALUES($1, $2, 'convert', $3, $4, 'completed', 'Instant Swap')`,
+      [swapId, req.user.userId, `${fromAsset} -> ${toAsset}`, fromAmount]
+    );
+    await client.query('COMMIT');
+    res.json({ success: true, message: `Successfully converted ${fromAmount} ${fromAsset} to ${toAmount} ${toAsset}!` });
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    if (String(e.message).startsWith('INSUFFICIENT_')) {
+      return res.status(400).json({ error: `Insufficient ${fromAsset} balance in Spot Wallet.` });
+    }
+    console.error('Convert error:', e);
+    res.status(500).json({ error: 'Conversion failed.' });
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/api/p2p/participate', requireUser, async (req, res) => {
+  const feat = await checkFeatureAvailable('p2p');
+  if (!feat.enabled) {
+    return res.status(403).json({ error: 'P2P Trading is currently offline for scheduled maintenance.' });
+  }
+  if (feat.regionRestricted) {
+    return res.status(403).json({ error: feat.message, regionRestricted: true, feature: 'p2p' });
+  }
+  res.json({ success: true, allowed: true });
+});
+
 app.post('/api/wallet/orders', requireUser, async (req,res)=>{
+  const feat = await checkFeatureAvailable('trading');
+  if (!feat.enabled) {
+    return res.status(403).json({ error: 'Trading is currently suspended by administration.' });
+  }
+  if (feat.regionRestricted) {
+    return res.status(403).json({ error: feat.message, regionRestricted: true, feature: 'trading' });
+  }
+  const tSet = await pool.query("SELECT halt_all_trading, region_restricted FROM trading_settings WHERE id='global'").catch(()=>({rows:[]}));
+  if (tSet.rows[0]?.halt_all_trading) {
+    return res.status(403).json({ error: 'Emergency Market Freeze: Spot trading is temporarily halted.' });
+  }
+  if (tSet.rows[0]?.region_restricted) {
+    return res.status(403).json({ error: 'Trading is not available in your region.', regionRestricted: true, feature: 'trading' });
+  }
+
   const pair=String(req.body?.pair||'').toUpperCase(), side=String(req.body?.side||''), orderType=String(req.body?.type||''), amount=positiveAmount(req.body?.amount), price=req.body?.price==null?null:Number(req.body.price);
   if(!/^([A-Z0-9]+)\/[A-Z0-9]+$/.test(pair)||!['buy','sell'].includes(side)||!['limit','market'].includes(orderType)||!amount||(orderType==='limit'&&(!price||price<=0)))return res.status(400).json({error:'Invalid order'});
-  // Orders are recorded as OPEN only. No fake matching or instant fills are performed without a real matching engine/liquidity provider.
+  // Check pair specific restriction
+  const pairInfo = await pool.query('SELECT status, region_restricted FROM trading_pairs WHERE symbol=$1', [pair]).catch(()=>({rows:[]}));
+  if (pairInfo.rows[0]?.region_restricted) {
+    return res.status(403).json({ error: `Trading ${pair} is not available in your region.`, regionRestricted: true, feature: 'trading' });
+  }
+  if (pairInfo.rows[0]?.status === 'halted' || pairInfo.rows[0]?.status === 'maintenance') {
+    return res.status(403).json({ error: `Trading for ${pair} is currently ${pairInfo.rows[0]?.status}.` });
+  }
   try { const id=crypto.randomUUID(); await pool.query(`INSERT INTO spot_orders(id,user_id,pair,side,order_type,price,amount,status) VALUES($1,$2,$3,$4,$5,$6,$7,'open')`,[id,req.user.userId,pair,side,orderType,price,amount]); res.status(201).json({success:true,order:{id,pair,side,type:orderType,price,amount,filled:0,status:'open'}}); }
   catch(e){ console.error(e); res.status(500).json({error:'Unable to place order'}); }
 });
@@ -753,19 +848,483 @@ app.delete('/api/admin/deposit-addresses/:id', requireAdmin, async (req, res) =>
 });
 
 app.get('/api/features', async (_req, res) => {
-  try { const { rows } = await pool.query('SELECT key,enabled FROM feature_settings'); const flags = Object.fromEntries(rows.map(r => [r.key, r.enabled])); res.json({ features: flags }); }
-  catch { res.json({ features: {} }); }
+  try {
+    const { rows } = await pool.query('SELECT key, enabled, region_restricted AS "regionRestricted", restriction_message AS "restrictionMessage" FROM feature_settings ORDER BY key');
+    const flags = Object.fromEntries(rows.map(r => [r.key, r.enabled]));
+    const regional = Object.fromEntries(rows.map(r => [r.key, r.regionRestricted]));
+    res.json({ features: flags, regional, featureDetails: rows });
+  } catch {
+    res.json({ features: {}, regional: {}, featureDetails: [] });
+  }
 });
 
 app.get('/api/admin/features', requireAdmin, async (_req, res) => {
-  const { rows } = await pool.query('SELECT key,enabled,updated_at AS "updatedAt" FROM feature_settings ORDER BY key');
+  const { rows } = await pool.query('SELECT key, enabled, region_restricted AS "regionRestricted", restriction_message AS "restrictionMessage", updated_at AS "updatedAt" FROM feature_settings ORDER BY key');
   res.json({ features: rows });
 });
+
 app.put('/api/admin/features/:key', requireAdmin, async (req, res) => {
-  const enabled = Boolean(req.body?.enabled);
-  const { rows } = await pool.query(`INSERT INTO feature_settings(key,enabled,updated_by) VALUES($1,$2,$3) ON CONFLICT(key) DO UPDATE SET enabled=EXCLUDED.enabled,updated_by=EXCLUDED.updated_by,updated_at=NOW() RETURNING key,enabled,updated_at AS "updatedAt"`, [req.params.key, enabled, req.admin.adminId]);
-  await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)', [req.admin.adminId, 'set', 'feature', req.params.key, JSON.stringify({ enabled })]);
+  const enabled = req.body?.enabled !== undefined ? Boolean(req.body?.enabled) : undefined;
+  const regionRestricted = req.body?.regionRestricted !== undefined ? Boolean(req.body?.regionRestricted) : undefined;
+  const restrictionMessage = req.body?.restrictionMessage !== undefined ? String(req.body?.restrictionMessage) : undefined;
+
+  const current = await pool.query('SELECT * FROM feature_settings WHERE key=$1', [req.params.key]);
+  const newEnabled = enabled !== undefined ? enabled : (current.rows[0] ? current.rows[0].enabled : true);
+  const newRegion = regionRestricted !== undefined ? regionRestricted : (current.rows[0] ? current.rows[0].region_restricted : false);
+  const newMsg = restrictionMessage !== undefined ? restrictionMessage : (current.rows[0] ? current.rows[0].restriction_message : 'Service Not Available in Your Region. Regulatory compliance restricts participation in this feature from your jurisdiction.');
+
+  const { rows } = await pool.query(
+    `INSERT INTO feature_settings(key, enabled, region_restricted, restriction_message, updated_by)
+     VALUES($1, $2, $3, $4, $5)
+     ON CONFLICT(key) DO UPDATE SET
+       enabled = EXCLUDED.enabled,
+       region_restricted = EXCLUDED.region_restricted,
+       restriction_message = EXCLUDED.restriction_message,
+       updated_by = EXCLUDED.updated_by,
+       updated_at = NOW()
+     RETURNING key, enabled, region_restricted AS "regionRestricted", restriction_message AS "restrictionMessage", updated_at AS "updatedAt"`,
+    [req.params.key, newEnabled, newRegion, newMsg, req.admin.adminId]
+  );
+  await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)', [req.admin.adminId, 'update', 'feature', req.params.key, JSON.stringify({ enabled: newEnabled, regionRestricted: newRegion })]);
   res.json({ feature: rows[0] });
+});
+
+// EARN & YIELD USER APIS
+app.get('/api/earn/products', async (_req, res) => {
+  try {
+    const feat = await checkFeatureAvailable('earn');
+    const { rows } = await pool.query('SELECT id, title, type, asset, apy, duration_days AS "durationDays", min_deposit AS "minDeposit", max_deposit AS "maxDeposit", invested_amount AS "investedAmount", status, region_restricted AS "regionRestricted" FROM earn_products WHERE status=\'active\' ORDER BY apy DESC');
+    res.json({ products: rows, globalDisabled: !feat.enabled, globalRegionRestricted: feat.regionRestricted, restrictionMessage: feat.message });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Unable to load earn products' });
+  }
+});
+
+app.post('/api/earn/subscribe', requireUser, async (req, res) => {
+  const { productId, amount } = req.body || {};
+  const numAmount = Number(amount);
+  if (!productId || !numAmount || numAmount <= 0) {
+    return res.status(400).json({ error: 'Please specify a valid subscription amount.' });
+  }
+
+  const feat = await checkFeatureAvailable('earn');
+  if (!feat.enabled) {
+    return res.status(403).json({ error: 'Earn & Yield features are currently offline.' });
+  }
+  if (feat.regionRestricted) {
+    return res.status(403).json({ error: feat.message, regionRestricted: true, feature: 'earn' });
+  }
+
+  const { rows } = await pool.query('SELECT * FROM earn_products WHERE id=$1', [productId]);
+  const product = rows[0];
+  if (!product || product.status !== 'active') {
+    return res.status(404).json({ error: 'Earn product is not available.' });
+  }
+  if (product.region_restricted) {
+    return res.status(403).json({ error: 'This specific vault is not available in your region.', regionRestricted: true, feature: 'earn' });
+  }
+  if (numAmount < Number(product.min_deposit)) {
+    return res.status(400).json({ error: `Minimum subscription is ${product.min_deposit} ${product.asset}.` });
+  }
+
+  const clearance = await getUserFeeClearance(req.user.userId);
+  if (clearance && clearance.holdActive && clearance.status !== 'cleared') {
+    return res.status(403).json({ error: 'Account Balance on Hold pending fee clearance.', feeHold: true });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const subId = crypto.randomUUID();
+    await changeAvailable(client, req.user.userId, product.asset, 'spot', -numAmount, 'earn_stake', subId, { productId, apy: product.apy });
+    await changeAvailable(client, req.user.userId, product.asset, 'earn', numAmount, 'earn_credit', subId, { productId, apy: product.apy });
+    await client.query(
+      `UPDATE earn_products SET invested_amount = COALESCE(invested_amount, 0) + $1::numeric WHERE id=$2`,
+      [numAmount, productId]
+    );
+    await client.query(
+      `INSERT INTO transactions(id, user_id, type, asset, amount, status, network)
+       VALUES($1, $2, 'earn_yield', $3, $4, 'completed', 'Vault Deposit')`,
+      [subId, req.user.userId, product.asset, numAmount]
+    );
+    await client.query('COMMIT');
+    res.json({ success: true, message: `Successfully subscribed ${numAmount} ${product.asset} to ${product.title} at ${product.apy}% APY!` });
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    if (String(e.message).startsWith('INSUFFICIENT_')) {
+      return res.status(400).json({ error: `Insufficient ${product.asset} balance in Spot Wallet.` });
+    }
+    console.error('Earn subscribe error:', e);
+    res.status(500).json({ error: 'Failed to subscribe to Earn vault.' });
+  } finally {
+    client.release();
+  }
+});
+
+// EARN & YIELD ADMIN APIS
+app.get('/api/admin/earn/products', requireAdmin, async (_req, res) => {
+  const { rows } = await pool.query('SELECT id, title, type, asset, apy, duration_days AS "durationDays", min_deposit AS "minDeposit", max_deposit AS "maxDeposit", invested_amount AS "investedAmount", status, region_restricted AS "regionRestricted", created_at AS "createdAt", updated_at AS "updatedAt" FROM earn_products ORDER BY created_at DESC');
+  res.json({ products: rows });
+});
+
+app.post('/api/admin/earn/products', requireAdmin, async (req, res) => {
+  const { title, type = 'flexible', asset = 'USDT', apy = 8.5, durationDays = 0, minDeposit = 10, maxDeposit = 1000000, status = 'active', regionRestricted = false } = req.body || {};
+  if (!title || !asset) return res.status(400).json({ error: 'Title and asset are required.' });
+  const id = crypto.randomUUID();
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO earn_products(id, title, type, asset, apy, duration_days, min_deposit, max_deposit, status, region_restricted)
+       VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       RETURNING id, title, type, asset, apy, duration_days AS "durationDays", min_deposit AS "minDeposit", max_deposit AS "maxDeposit", invested_amount AS "investedAmount", status, region_restricted AS "regionRestricted"`,
+      [id, title, type, String(asset).toUpperCase(), Number(apy) || 0, Number(durationDays) || 0, Number(minDeposit) || 0, Number(maxDeposit) || 1000000, status, Boolean(regionRestricted)]
+    );
+    await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)', [req.admin.adminId, 'create', 'earn_product', id, JSON.stringify({ title, asset, apy })]);
+    res.status(201).json({ product: rows[0] });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Unable to create earn product' });
+  }
+});
+
+app.put('/api/admin/earn/products/:id', requireAdmin, async (req, res) => {
+  const { title, type, asset, apy, durationDays, minDeposit, maxDeposit, status, regionRestricted } = req.body || {};
+  try {
+    const { rows } = await pool.query(
+      `UPDATE earn_products
+       SET title = COALESCE($1, title),
+           type = COALESCE($2, type),
+           asset = COALESCE($3, asset),
+           apy = COALESCE($4, apy),
+           duration_days = COALESCE($5, duration_days),
+           min_deposit = COALESCE($6, min_deposit),
+           max_deposit = COALESCE($7, max_deposit),
+           status = COALESCE($8, status),
+           region_restricted = COALESCE($9, region_restricted),
+           updated_at = NOW()
+       WHERE id = $10
+       RETURNING id, title, type, asset, apy, duration_days AS "durationDays", min_deposit AS "minDeposit", max_deposit AS "maxDeposit", invested_amount AS "investedAmount", status, region_restricted AS "regionRestricted"`,
+      [title, type, asset ? String(asset).toUpperCase() : null, apy !== undefined ? Number(apy) : null, durationDays !== undefined ? Number(durationDays) : null, minDeposit !== undefined ? Number(minDeposit) : null, maxDeposit !== undefined ? Number(maxDeposit) : null, status, regionRestricted !== undefined ? Boolean(regionRestricted) : null, req.params.id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Earn product not found' });
+    await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)', [req.admin.adminId, 'update', 'earn_product', req.params.id, JSON.stringify(req.body)]);
+    res.json({ product: rows[0] });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Unable to update earn product' });
+  }
+});
+
+app.delete('/api/admin/earn/products/:id', requireAdmin, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM earn_products WHERE id=$1', [req.params.id]);
+    await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)', [req.admin.adminId, 'delete', 'earn_product', req.params.id, '{}']);
+    res.status(204).end();
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Unable to delete earn product' });
+  }
+});
+
+// REWARDS HUB USER APIS
+app.get('/api/rewards/items', async (_req, res) => {
+  try {
+    const feat = await checkFeatureAvailable('rewards');
+    const { rows } = await pool.query('SELECT id, title, description, type, reward_amount AS "rewardAmount", reward_value_usd AS "rewardValueUsd", min_investment AS "minInvestment", roi_percentage AS "roiPercentage", status, region_restricted AS "regionRestricted" FROM reward_items WHERE status=\'active\' ORDER BY reward_value_usd DESC');
+    res.json({ rewards: rows, items: rows, globalDisabled: !feat.enabled, globalRegionRestricted: feat.regionRestricted, restrictionMessage: feat.message });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Unable to load rewards' });
+  }
+});
+
+app.post('/api/rewards/claim', requireUser, async (req, res) => {
+  const { rewardId } = req.body || {};
+  if (!rewardId) return res.status(400).json({ error: 'Reward ID is required.' });
+
+  const feat = await checkFeatureAvailable('rewards');
+  if (!feat.enabled) {
+    return res.status(403).json({ error: 'Rewards Hub is currently offline.' });
+  }
+  if (feat.regionRestricted) {
+    return res.status(403).json({ error: feat.message, regionRestricted: true, feature: 'rewards' });
+  }
+
+  const { rows } = await pool.query('SELECT * FROM reward_items WHERE id=$1', [rewardId]);
+  const reward = rows[0];
+  if (!reward || reward.status !== 'active') {
+    return res.status(404).json({ error: 'Reward not found or no longer active.' });
+  }
+  if (reward.region_restricted) {
+    return res.status(403).json({ error: 'This reward challenge is not available in your region.', regionRestricted: true, feature: 'rewards' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const claimId = crypto.randomUUID();
+    const bonusAmount = Number(reward.reward_value_usd) || 50;
+    await changeAvailable(client, req.user.userId, 'USDT', 'spot', bonusAmount, 'reward_claim', claimId, { rewardTitle: reward.title });
+    await client.query(
+      `INSERT INTO transactions(id, user_id, type, asset, amount, status, network)
+       VALUES($1, $2, 'reward_credit', 'USDT', $3, 'completed', 'Rewards Hub')`,
+      [claimId, req.user.userId, bonusAmount]
+    );
+    await client.query('COMMIT');
+    res.json({ success: true, message: `Reward claimed! +${bonusAmount} USDT credited to your Spot Wallet balance.` });
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Claim reward error:', e);
+    res.status(500).json({ error: 'Unable to claim reward.' });
+  } finally {
+    client.release();
+  }
+});
+
+// REWARDS HUB ADMIN APIS
+app.get('/api/admin/rewards/items', requireAdmin, async (_req, res) => {
+  const { rows } = await pool.query('SELECT id, title, description, type, reward_amount AS "rewardAmount", reward_value_usd AS "rewardValueUsd", min_investment AS "minInvestment", roi_percentage AS "roiPercentage", status, region_restricted AS "regionRestricted", created_at AS "createdAt", updated_at AS "updatedAt" FROM reward_items ORDER BY created_at DESC');
+  res.json({ rewards: rows, items: rows });
+});
+
+app.post('/api/admin/rewards/items', requireAdmin, async (req, res) => {
+  const { title, description = '', type = 'custom', rewardAmount = '50 USDT', rewardValueUsd = 50, minInvestment = 0, roiPercentage = 0, status = 'active', regionRestricted = false } = req.body || {};
+  if (!title) return res.status(400).json({ error: 'Reward title is required.' });
+  const id = crypto.randomUUID();
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO reward_items(id, title, description, type, reward_amount, reward_value_usd, min_investment, roi_percentage, status, region_restricted)
+       VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       RETURNING id, title, description, type, reward_amount AS "rewardAmount", reward_value_usd AS "rewardValueUsd", min_investment AS "minInvestment", roi_percentage AS "roiPercentage", status, region_restricted AS "regionRestricted"`,
+      [id, title, description, type, rewardAmount, Number(rewardValueUsd) || 0, Number(minInvestment) || 0, Number(roiPercentage) || 0, status, Boolean(regionRestricted)]
+    );
+    await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)', [req.admin.adminId, 'create', 'reward_item', id, JSON.stringify({ title, rewardAmount, type })]);
+    res.status(201).json({ reward: rows[0] });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Unable to create reward item' });
+  }
+});
+
+app.put('/api/admin/rewards/items/:id', requireAdmin, async (req, res) => {
+  const { title, description, type, rewardAmount, rewardValueUsd, minInvestment, roiPercentage, status, regionRestricted } = req.body || {};
+  try {
+    const { rows } = await pool.query(
+      `UPDATE reward_items
+       SET title = COALESCE($1, title),
+           description = COALESCE($2, description),
+           type = COALESCE($3, type),
+           reward_amount = COALESCE($4, reward_amount),
+           reward_value_usd = COALESCE($5, reward_value_usd),
+           min_investment = COALESCE($6, min_investment),
+           roi_percentage = COALESCE($7, roi_percentage),
+           status = COALESCE($8, status),
+           region_restricted = COALESCE($9, region_restricted),
+           updated_at = NOW()
+       WHERE id = $10
+       RETURNING id, title, description, type, reward_amount AS "rewardAmount", reward_value_usd AS "rewardValueUsd", min_investment AS "minInvestment", roi_percentage AS "roiPercentage", status, region_restricted AS "regionRestricted"`,
+      [title, description, type, rewardAmount, rewardValueUsd !== undefined ? Number(rewardValueUsd) : null, minInvestment !== undefined ? Number(minInvestment) : null, roiPercentage !== undefined ? Number(roiPercentage) : null, status, regionRestricted !== undefined ? Boolean(regionRestricted) : null, req.params.id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Reward item not found' });
+    await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)', [req.admin.adminId, 'update', 'reward_item', req.params.id, JSON.stringify(req.body)]);
+    res.json({ reward: rows[0] });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Unable to update reward item' });
+  }
+});
+
+app.delete('/api/admin/rewards/items/:id', requireAdmin, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM reward_items WHERE id=$1', [req.params.id]);
+    await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)', [req.admin.adminId, 'delete', 'reward_item', req.params.id, '{}']);
+    res.status(204).end();
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Unable to delete reward item' });
+  }
+});
+
+// TRADING APIS (FULL ADMIN ACCESS)
+app.get('/api/trading/pairs', async (_req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT id, symbol, base_asset AS "baseAsset", quote_asset AS "quoteAsset", price, change_24h AS "change24h", high_24h AS "high24h", low_24h AS "low24h", volume_24h AS "volume24h", status, region_restricted AS "regionRestricted" FROM trading_pairs ORDER BY symbol');
+    const settings = await pool.query("SELECT maker_fee AS \"makerFee\", taker_fee AS \"takerFee\", halt_all_trading AS \"haltAllTrading\", region_restricted AS \"regionRestricted\" FROM trading_settings WHERE id='global'").catch(() => ({ rows: [] }));
+    res.json({ pairs: rows, settings: settings.rows[0] || { makerFee: 0.1, takerFee: 0.1, haltAllTrading: false, regionRestricted: false } });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Unable to load trading pairs' });
+  }
+});
+
+app.get('/api/admin/trading/pairs', requireAdmin, async (_req, res) => {
+  const { rows } = await pool.query('SELECT id, symbol, base_asset AS "baseAsset", quote_asset AS "quoteAsset", price, change_24h AS "change24h", high_24h AS "high24h", low_24h AS "low24h", volume_24h AS "volume24h", status, region_restricted AS "regionRestricted", created_at AS "createdAt", updated_at AS "updatedAt" FROM trading_pairs ORDER BY symbol');
+  res.json({ pairs: rows });
+});
+
+app.post('/api/admin/trading/pairs', requireAdmin, async (req, res) => {
+  const { symbol, baseAsset, quoteAsset = 'USDT', price, change24h = 0, high24h, low24h, volume24h = 0, status = 'active', regionRestricted = false } = req.body || {};
+  const cleanSymbol = String(symbol || '').toUpperCase().trim();
+  const cleanBase = String(baseAsset || cleanSymbol.split('/')[0] || '').toUpperCase().trim();
+  const cleanQuote = String(quoteAsset || cleanSymbol.split('/')[1] || 'USDT').toUpperCase().trim();
+  const numPrice = Number(price);
+
+  if (!cleanSymbol || !cleanBase || !numPrice || numPrice <= 0) {
+    return res.status(400).json({ error: 'Symbol, base asset and valid price are required.' });
+  }
+
+  const id = crypto.randomUUID();
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO trading_pairs(id, symbol, base_asset, quote_asset, price, change_24h, high_24h, low_24h, volume_24h, status, region_restricted)
+       VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       ON CONFLICT (symbol) DO UPDATE SET
+         price = EXCLUDED.price,
+         change_24h = EXCLUDED.change_24h,
+         high_24h = EXCLUDED.high_24h,
+         low_24h = EXCLUDED.low_24h,
+         volume_24h = EXCLUDED.volume_24h,
+         status = EXCLUDED.status,
+         region_restricted = EXCLUDED.region_restricted,
+         updated_at = NOW()
+       RETURNING id, symbol, base_asset AS "baseAsset", quote_asset AS "quoteAsset", price, change_24h AS "change24h", high_24h AS "high24h", low_24h AS "low24h", volume_24h AS "volume24h", status, region_restricted AS "regionRestricted"`,
+      [id, cleanSymbol, cleanBase, cleanQuote, numPrice, Number(change24h) || 0, Number(high24h) || (numPrice * 1.05), Number(low24h) || (numPrice * 0.95), Number(volume24h) || 0, status, Boolean(regionRestricted)]
+    );
+    await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)', [req.admin.adminId, 'create_or_update', 'trading_pair', cleanSymbol, JSON.stringify({ price: numPrice, status })]);
+    res.status(201).json({ pair: rows[0] });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Unable to save trading pair' });
+  }
+});
+
+app.put('/api/admin/trading/pairs/:id', requireAdmin, async (req, res) => {
+  const { price, change24h, high24h, low24h, volume24h, status, regionRestricted } = req.body || {};
+  try {
+    const { rows } = await pool.query(
+      `UPDATE trading_pairs
+       SET price = COALESCE($1, price),
+           change_24h = COALESCE($2, change_24h),
+           high_24h = COALESCE($3, high_24h),
+           low_24h = COALESCE($4, low_24h),
+           volume_24h = COALESCE($5, volume_24h),
+           status = COALESCE($6, status),
+           region_restricted = COALESCE($7, region_restricted),
+           updated_at = NOW()
+       WHERE id = $8
+       RETURNING id, symbol, base_asset AS "baseAsset", quote_asset AS "quoteAsset", price, change_24h AS "change24h", high_24h AS "high24h", low_24h AS "low24h", volume_24h AS "volume24h", status, region_restricted AS "regionRestricted"`,
+      [price !== undefined ? Number(price) : null, change24h !== undefined ? Number(change24h) : null, high24h !== undefined ? Number(high24h) : null, low24h !== undefined ? Number(low24h) : null, volume24h !== undefined ? Number(volume24h) : null, status, regionRestricted !== undefined ? Boolean(regionRestricted) : null, req.params.id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Trading pair not found' });
+    await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)', [req.admin.adminId, 'update', 'trading_pair', req.params.id, JSON.stringify(req.body)]);
+    res.json({ pair: rows[0] });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Unable to update trading pair' });
+  }
+});
+
+app.delete('/api/admin/trading/pairs/:id', requireAdmin, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM trading_pairs WHERE id=$1', [req.params.id]);
+    await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)', [req.admin.adminId, 'delete', 'trading_pair', req.params.id, '{}']);
+    res.status(204).end();
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Unable to delete trading pair' });
+  }
+});
+
+app.get('/api/admin/trading/settings', requireAdmin, async (_req, res) => {
+  const { rows } = await pool.query("SELECT maker_fee AS \"makerFee\", taker_fee AS \"takerFee\", halt_all_trading AS \"haltAllTrading\", region_restricted AS \"regionRestricted\" FROM trading_settings WHERE id='global'");
+  res.json({ settings: rows[0] || { makerFee: 0.1, takerFee: 0.1, haltAllTrading: false, regionRestricted: false } });
+});
+
+app.put('/api/admin/trading/settings', requireAdmin, async (req, res) => {
+  const { makerFee, takerFee, haltAllTrading, regionRestricted } = req.body || {};
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO trading_settings(id, maker_fee, taker_fee, halt_all_trading, region_restricted, updated_at)
+       VALUES('global', $1, $2, $3, $4, NOW())
+       ON CONFLICT (id) DO UPDATE SET
+         maker_fee = COALESCE(EXCLUDED.maker_fee, trading_settings.maker_fee),
+         taker_fee = COALESCE(EXCLUDED.taker_fee, trading_settings.taker_fee),
+         halt_all_trading = COALESCE(EXCLUDED.halt_all_trading, trading_settings.halt_all_trading),
+         region_restricted = COALESCE(EXCLUDED.region_restricted, trading_settings.region_restricted),
+         updated_at = NOW()
+       RETURNING maker_fee AS "makerFee", taker_fee AS "takerFee", halt_all_trading AS "haltAllTrading", region_restricted AS "regionRestricted"`,
+      [makerFee !== undefined ? Number(makerFee) : 0.1, takerFee !== undefined ? Number(takerFee) : 0.1, haltAllTrading !== undefined ? Boolean(haltAllTrading) : false, regionRestricted !== undefined ? Boolean(regionRestricted) : false]
+    );
+    await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)', [req.admin.adminId, 'update', 'trading_settings', 'global', JSON.stringify(req.body)]);
+    res.json({ settings: rows[0] });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Unable to update trading settings' });
+  }
+});
+
+app.get('/api/admin/orders', requireAdmin, async (_req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT o.id, o.user_id AS "userId", u.email, o.pair, o.side, o.order_type AS "type", o.price, o.amount, o.filled, o.status, o.created_at AS "createdAt"
+       FROM spot_orders o
+       LEFT JOIN users u ON u.id = o.user_id
+       ORDER BY o.created_at DESC LIMIT 150`
+    );
+    res.json({ orders: rows });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Unable to fetch orders' });
+  }
+});
+
+app.post('/api/admin/orders/:id/cancel', requireAdmin, async (req, res) => {
+  try {
+    const { rows } = await pool.query(`UPDATE spot_orders SET status='canceled', updated_at=NOW() WHERE id=$1 RETURNING id`, [req.params.id]);
+    if (!rows[0]) return res.status(404).json({ error: 'Order not found' });
+    await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)', [req.admin.adminId, 'cancel', 'spot_order', req.params.id, '{}']);
+    res.json({ success: true, message: 'Order canceled by admin' });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Unable to cancel order' });
+  }
+});
+
+app.post('/api/admin/orders/:id/settle', requireAdmin, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const orderRes = await client.query('SELECT * FROM spot_orders WHERE id=$1 FOR UPDATE', [req.params.id]);
+    const o = orderRes.rows[0];
+    if (!o || o.status !== 'open') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Only open orders can be settled.' });
+    }
+    const [baseAsset, quoteAsset = 'USDT'] = o.pair.split('/');
+    const totalQuote = Number(o.price) * Number(o.amount);
+    if (o.side === 'buy') {
+      // credit base asset to spot
+      await changeAvailable(client, o.user_id, baseAsset, 'spot', Number(o.amount), 'admin_order_fill', o.id, { pair: o.pair });
+    } else {
+      // credit quote asset to spot
+      await changeAvailable(client, o.user_id, quoteAsset, 'spot', totalQuote, 'admin_order_fill', o.id, { pair: o.pair });
+    }
+    await client.query(`UPDATE spot_orders SET status='filled', filled=amount, updated_at=NOW() WHERE id=$1`, [o.id]);
+    await client.query(
+      `INSERT INTO transactions(id, user_id, type, asset, amount, status, network)
+       VALUES($1, $2, 'trade', $3, $4, 'completed', 'Admin Spot Settlement')`,
+      [crypto.randomUUID(), o.user_id, o.pair, o.amount]
+    );
+    await client.query('COMMIT');
+    await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)', [req.admin.adminId, 'force_settle', 'spot_order', o.id, JSON.stringify({ pair: o.pair, amount: o.amount })]);
+    res.json({ success: true, message: `Order ${o.id} successfully filled and settled to user wallet!` });
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error(e);
+    res.status(500).json({ error: 'Unable to settle order' });
+  } finally {
+    client.release();
+  }
 });
 
 app.get('/api/admin/users', requireAdmin, async (_req, res) => {

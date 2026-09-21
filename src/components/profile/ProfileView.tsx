@@ -204,7 +204,42 @@ export const ProfileView: React.FC = () => {
             </span>
           </div>
 
-          <div className="overflow-x-auto">
+          {/* Mobile View: VIP Tier Cards */}
+          <div className="md:hidden divide-y divide-slate-800/60 font-mono">
+            {vipTiers.map(tier => (
+              <div key={tier.tier} className={`py-3.5 space-y-2 ${tier.current ? 'bg-cyan-950/20 px-3 rounded-xl border border-cyan-800/50' : ''}`}>
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-white text-sm font-sans">{tier.tier}</span>
+                  {tier.current ? (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-950 text-cyan-300 border border-cyan-800">
+                      Current Tier
+                    </span>
+                  ) : (
+                    <span className="text-xs text-slate-500">Tier</span>
+                  )}
+                </div>
+
+                <div className="text-xs text-slate-300">
+                  <span className="text-slate-500 font-sans">Volume: </span>
+                  <span>{tier.volume}</span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-xs pt-1">
+                  <div>
+                    <span className="text-slate-500 font-sans">Maker: </span>
+                    <span className="text-emerald-400 font-bold">{tier.maker}</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-slate-500 font-sans">Taker: </span>
+                    <span className="text-cyan-400 font-bold">{tier.taker}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop View: Full Table */}
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-left text-xs font-mono">
               <thead className="text-[11px] text-slate-500 uppercase border-b border-slate-800 font-sans">
                 <tr>
@@ -256,7 +291,48 @@ export const ProfileView: React.FC = () => {
             </button>
           </div>
 
-          <div className="overflow-x-auto">
+          {/* Mobile View: API Key Cards */}
+          <div className="md:hidden divide-y divide-slate-800/60 font-mono">
+            {apiKeys.map(k => (
+              <div key={k.id} className="py-3.5 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-white font-sans text-sm">{k.name}</span>
+                  <button
+                    onClick={() => setApiKeys(prev => prev.filter(item => item.id !== k.id))}
+                    className="p-1.5 rounded text-rose-400 hover:bg-rose-950 transition-colors"
+                    title="Delete Key"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between bg-slate-900/60 p-2 rounded-lg border border-slate-800/80 text-xs">
+                  <span className="text-cyan-400 truncate mr-2">{k.key}</span>
+                  <button
+                    onClick={() => handleCopyKey(k.key)}
+                    className="text-slate-400 hover:text-white shrink-0 flex items-center gap-1 text-[11px]"
+                  >
+                    {copiedKey === k.key ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedKey === k.key ? 'Copied' : 'Copy'}</span>
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between text-[11px] text-slate-400 font-sans">
+                  <div className="flex gap-1">
+                    {k.perms.map(p => (
+                      <span key={p} className="px-1.5 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300 border border-slate-700">
+                        {p}
+                      </span>
+                    ))}
+                  </div>
+                  <span>{k.created}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop View: Full Table */}
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-left text-xs font-mono">
               <thead className="text-[11px] text-slate-500 uppercase border-b border-slate-800 font-sans">
                 <tr>

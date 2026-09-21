@@ -46,6 +46,12 @@ interface CryptoContextType {
   unreadNotifsCount: number;
   featureFlags: Record<string, boolean>;
   isFeatureEnabled: (key: string) => boolean;
+  regionalRestrictions: Record<string, boolean>;
+  regionModalState: { open: boolean; feature: string; message: string };
+  triggerRegionRestricted: (featureName: string, customMessage?: string) => void;
+  closeRegionRestricted: () => void;
+  claimRewardItem: (rewardId: string, rewardTitle: string) => Promise<{ success: boolean; message: string }>;
+  checkP2PAvailable: () => Promise<boolean>;
   
   // Modals state
   depositModalOpen: boolean;
@@ -115,13 +121,33 @@ export const CryptoProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [userProfile, setUserProfile] = useState<UserProfile>(INITIAL_USER_PROFILE);
   const [notifications, setNotifications] = useState<AppNotification[]>(NOTIFICATIONS);
   const [featureFlags, setFeatureFlags] = useState<Record<string, boolean>>({
-    deposits:true, withdrawals:true, trading:true, p2p:false, buySell:false, convert:false, earn:false, rewards:false, referrals:false, kyc:true
+    deposits: true, withdrawals: true, trading: true, p2p: true, buySell: true, convert: true, earn: true, rewards: true, referrals: true, kyc: true
   });
+  const [regionalRestrictions, setRegionalRestrictions] = useState<Record<string, boolean>>({
+    p2p: false, earn: false, rewards: false, convert: false, trading: false
+  });
+  const [regionModalState, setRegionModalState] = useState<{ open: boolean; feature: string; message: string }>({
+    open: false, feature: '', message: ''
+  });
+
+  const triggerRegionRestricted = (featureName: string, customMessage?: string) => {
+    setRegionModalState({
+      open: true,
+      feature: featureName,
+      message: customMessage || `Access to ${featureName} is currently restricted in your geographic jurisdiction due to local financial compliance laws and regulatory mandates.`
+    });
+  };
+  const closeRegionRestricted = () => {
+    setRegionModalState(prev => ({ ...prev, open: false }));
+  };
 
   useEffect(() => {
     fetch(`${import.meta.env.VITE_API_URL || ''}/api/features`)
       .then(r => r.ok ? r.json() : Promise.reject(new Error('feature service unavailable')))
-      .then(data => setFeatureFlags(prev => ({ ...prev, ...(data.features || {}) })))
+      .then(data => {
+        if (data.features) setFeatureFlags(prev => ({ ...prev, ...data.features }));
+        if (data.regional) setRegionalRestrictions(prev => ({ ...prev, ...data.regional }));
+      })
       .catch(() => {});
   }, []);
 
@@ -292,7 +318,29 @@ export const CryptoProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   };
   const cancelSpotOrder = async (orderId:string) => { try { const r=await authFetch(apiUrl(`/api/wallet/orders/${orderId}/cancel`),{method:'POST'}); if(r.ok) await refreshWallet(); } catch{} };
   const executeInternalTransfer = async (asset:string,fromAccount:'spot'|'funding'|'earn',toAccount:'spot'|'funding'|'earn',amount:number) => { try { const r=await authFetch(apiUrl('/api/wallet/internal-transfer'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({asset,fromAccount,toAccount,amount})}); const d=await r.json().catch(()=>({})); if(!r.ok)return {success:false,message:d.error||'Transfer failed'}; setBalances({...emptyBalances,...(d.balances||{})}); await refreshWallet(); return {success:true,message:`Successfully transferred ${amount} ${asset} from ${fromAccount.toUpperCase()} to ${toAccount.toUpperCase()}.`}; } catch{return {success:false,message:'Wallet service unavailable.'};} };
-  const executeConvert = async (_from:string,_to:string,_amount:number,_receive:number) => ({success:false,message:'Convert is unavailable until a real quote and liquidity provider is connected. No balance was changed.'});
+  const executeConvert = async (fromAsset: string, toAsset: string, fromAmount: number, toAmount: number) => {
+    if (regionalRestrictions['convert']) {
+      triggerRegionRestricted('Convert Hub');
+      return { success: false, message: 'Convert Hub is not available in your region.' };
+    }
+    try {
+      const r = await authFetch(apiUrl('/api/wallet/convert'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fromAsset, toAsset, fromAmount, toAmount }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (d.regionRestricted) {
+        triggerRegionRestricted('Convert Hub', d.error);
+        return { success: false, message: d.error };
+      }
+      if (!r.ok) return { success: false, message: d.error || 'Conversion failed' };
+      await refreshWallet();
+      return { success: true, message: d.message || `Converted ${fromAmount} ${fromAsset} to ${toAmount} ${toAsset}!` };
+    } catch {
+      return { success: false, message: 'Conversion service temporarily unavailable.' };
+    }
+  };
   const executeWithdrawal = async (asset:string,networkId:string,address:string,amount:number,_code2FA:string) => { try { const meta=assets.find(a=>a.symbol===asset); const network=meta?.networks.find(n=>n.id===networkId); const networkName=network?.name||network?.shortName||networkId; const r=await authFetch(apiUrl('/api/wallet/withdraw'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({asset,network:networkName,address,amount})}); const d=await r.json().catch(()=>({})); if(!r.ok)return {success:false,message:d.error||'Withdrawal failed'}; await refreshWallet(); return {success:true,message:d.message||'Withdrawal submitted for security review.'}; } catch{return {success:false,message:'Withdrawal service unavailable.'};} };
   const recordDeposit = async (asset:string,networkId:string,amount:number,txHash?:string,confirmedByUser?:boolean) => { 
     try { 
@@ -344,12 +392,82 @@ export const CryptoProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   };
 
-  // Earn/rewards are intentionally non-custodial until their real provider/ledger rules are configured.
-  const subscribeToEarnProduct = async (_productId:string, asset:string, amount:number, _apy:number) => {
-    const result = await executeInternalTransfer(asset,'spot','earn',amount);
-    if (result.success) setEarnSubscriptions(prev => [{id:`sub-${Date.now()}`,productId:_productId,asset,amount,apy:_apy,startDate:Date.now(),interestAccrued:0,autoRenew:true},...prev]);
-    return result.success ? {success:true,message:`${amount} ${asset} moved to Earn Wallet. Yield accrual is disabled until a real Earn provider is connected.`} : result;
+  const subscribeToEarnProduct = async (productId: string, asset: string, amount: number, apy: number) => {
+    if (regionalRestrictions['earn']) {
+      triggerRegionRestricted('Earn & Yield');
+      return { success: false, message: 'Earn & Yield is not available in your region.' };
+    }
+    try {
+      const r = await authFetch(apiUrl('/api/earn/subscribe'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productId, amount }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (d.regionRestricted) {
+        triggerRegionRestricted('Earn & Yield', d.error);
+        return { success: false, message: d.error };
+      }
+      if (!r.ok) return { success: false, message: d.error || 'Failed to subscribe' };
+      await refreshWallet();
+      setEarnSubscriptions(prev => [{
+        id: `sub-${Date.now()}`,
+        productId,
+        asset,
+        amount,
+        apy,
+        startDate: Date.now(),
+        interestAccrued: 0,
+        autoRenew: true
+      }, ...prev]);
+      return { success: true, message: d.message || `Subscribed to ${asset} vault successfully!` };
+    } catch {
+      return { success: false, message: 'Earn service unavailable.' };
+    }
   };
+
+  const claimRewardItem = async (rewardId: string, rewardTitle: string) => {
+    if (regionalRestrictions['rewards']) {
+      triggerRegionRestricted('Rewards Hub');
+      return { success: false, message: 'Rewards Hub is not available in your region.' };
+    }
+    try {
+      const r = await authFetch(apiUrl('/api/rewards/claim'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rewardId }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (d.regionRestricted) {
+        triggerRegionRestricted('Rewards Hub', d.error);
+        return { success: false, message: d.error };
+      }
+      if (!r.ok) return { success: false, message: d.error || 'Unable to claim reward' };
+      await refreshWallet();
+      return { success: true, message: d.message || `Claimed ${rewardTitle}!` };
+    } catch {
+      return { success: false, message: 'Rewards service unavailable.' };
+    }
+  };
+
+  const checkP2PAvailable = async () => {
+    if (regionalRestrictions['p2p']) {
+      triggerRegionRestricted('P2P Express Trading');
+      return false;
+    }
+    try {
+      const r = await authFetch(apiUrl('/api/p2p/participate'), { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (d.regionRestricted) {
+        triggerRegionRestricted('P2P Express Trading', d.error);
+        return false;
+      }
+      return true;
+    } catch {
+      return true;
+    }
+  };
+
   const checkInDaily = () => ({success:false,reward:0,message:'Rewards are disabled until a server-side rewards program is configured.'});
   const openMysteryBox = () => ({success:false,reward:0,asset:'USDT',message:'Rewards are disabled until a server-side rewards program is configured.'});
 
@@ -440,6 +558,12 @@ export const CryptoProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         unreadNotifsCount,
         featureFlags,
         isFeatureEnabled: (key: string) => featureFlags[key] !== false,
+        regionalRestrictions,
+        regionModalState,
+        triggerRegionRestricted,
+        closeRegionRestricted,
+        claimRewardItem,
+        checkP2PAvailable,
         depositModalOpen,
         openDepositModal,
         closeDepositModal,
