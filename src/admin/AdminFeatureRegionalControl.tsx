@@ -46,26 +46,40 @@ export const AdminFeatureRegionalControl: React.FC = () => {
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [saveSuccessKey, setSaveSuccessKey] = useState<string | null>(null);
   const [customMsgEdit, setCustomMsgEdit] = useState<Record<string, string>>({});
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [adminConfirmation, setAdminConfirmation] = useState<{ open: boolean; featureKey: string; featureName: string; type: 'on' | 'off' } | null>(null);
 
   const loadFeatures = async () => {
     setLoading(true);
+    setErrorMessage(null);
     try {
       const data = await apiFetch<any>('/api/admin/features');
       const map: Record<string, { enabled: boolean; region_restricted: boolean; restriction_message: string }> = {};
       const msgMap: Record<string, string> = {};
+
+      // Seed catalog defaults first
+      FEATURE_CATALOG.forEach(fc => {
+        map[fc.key] = { enabled: true, region_restricted: false, restriction_message: '' };
+        msgMap[fc.key] = '';
+      });
+
       (data.features || []).forEach((f: any) => {
-        map[f.feature_key] = {
+        const featureKey = f.key || f.feature_key;
+        if (!featureKey) return;
+        const isRestricted = Boolean(f.regionRestricted ?? f.region_restricted);
+        const msg = f.restrictionMessage ?? f.restriction_message ?? '';
+        map[featureKey] = {
           enabled: Boolean(f.enabled),
-          region_restricted: Boolean(f.region_restricted),
-          restriction_message: f.restriction_message || '',
+          region_restricted: isRestricted,
+          restriction_message: msg,
         };
-        msgMap[f.feature_key] = f.restriction_message || '';
+        msgMap[featureKey] = msg;
       });
       setFeatures(map);
       setCustomMsgEdit(msgMap);
-    } catch {
-      // ignore
+    } catch (err: any) {
+      console.error('Failed to load features:', err);
+      setErrorMessage(err.message || 'Unable to load feature statuses from server.');
     } finally {
       setLoading(false);
     }
@@ -82,20 +96,44 @@ export const AdminFeatureRegionalControl: React.FC = () => {
       [field]: !current[field],
     };
 
+    // Immediate optimistic update so buttons respond immediately with zero lag
+    setFeatures(prev => ({ ...prev, [key]: updated }));
     setSavingKey(key);
+    setErrorMessage(null);
+
+    const payload = {
+      enabled: updated.enabled,
+      regionRestricted: updated.region_restricted,
+      restrictionMessage: customMsgEdit[key] ?? current.restriction_message,
+    };
+
     try {
+      // Send update to server (supported via PUT or POST)
       await apiFetch(`/api/admin/features/${key}`, {
         method: 'POST',
-        body: JSON.stringify({
-          enabled: updated.enabled,
-          regionRestricted: updated.region_restricted,
-          restrictionMessage: customMsgEdit[key] ?? current.restriction_message,
-        }),
+        body: JSON.stringify(payload),
       });
 
-      setFeatures(prev => ({ ...prev, [key]: updated }));
       setSaveSuccessKey(key);
       setTimeout(() => setSaveSuccessKey(null), 2500);
+
+      // Broadcast changes across the application and tabs
+      try {
+        localStorage.setItem('kroma_feature_settings_sync', JSON.stringify({
+          key,
+          enabled: updated.enabled,
+          regionRestricted: updated.region_restricted,
+          time: Date.now()
+        }));
+        window.dispatchEvent(new CustomEvent('kroma:features-updated', {
+          detail: {
+            key,
+            enabled: updated.enabled,
+            regionRestricted: updated.region_restricted,
+            restrictionMessage: payload.restrictionMessage
+          }
+        }));
+      } catch {}
 
       if (field === 'region_restricted') {
         const featDef = FEATURE_CATALOG.find(f => f.key === key);
@@ -106,8 +144,11 @@ export const AdminFeatureRegionalControl: React.FC = () => {
           type: updated.region_restricted ? 'on' : 'off',
         });
       }
-    } catch {
-      // ignore
+    } catch (err: any) {
+      console.error('Toggle feature error:', err);
+      // Revert optimistic update on failure
+      setFeatures(prev => ({ ...prev, [key]: current }));
+      setErrorMessage(`Failed to update ${key}: ${err.message || 'Request failed'}`);
     } finally {
       setSavingKey(null);
     }
@@ -116,24 +157,48 @@ export const AdminFeatureRegionalControl: React.FC = () => {
   const handleSaveMessage = async (key: string) => {
     const current = features[key] || { enabled: true, region_restricted: false, restriction_message: '' };
     setSavingKey(key);
+    setErrorMessage(null);
+
+    const messageToSave = customMsgEdit[key] || '';
+    const payload = {
+      enabled: current.enabled,
+      regionRestricted: current.region_restricted,
+      restrictionMessage: messageToSave,
+    };
+
     try {
       await apiFetch(`/api/admin/features/${key}`, {
         method: 'POST',
-        body: JSON.stringify({
-          enabled: current.enabled,
-          regionRestricted: current.region_restricted,
-          restrictionMessage: customMsgEdit[key] || '',
-        }),
+        body: JSON.stringify(payload),
       });
 
       setFeatures(prev => ({
         ...prev,
-        [key]: { ...current, restriction_message: customMsgEdit[key] || '' },
+        [key]: { ...current, restriction_message: messageToSave },
       }));
       setSaveSuccessKey(key);
-      setTimeout(() => setSaveSuccessKey(null), 2000);
-    } catch {
-      // ignore
+      setTimeout(() => setSaveSuccessKey(null), 2500);
+
+      try {
+        localStorage.setItem('kroma_feature_settings_sync', JSON.stringify({
+          key,
+          enabled: current.enabled,
+          regionRestricted: current.region_restricted,
+          restrictionMessage: messageToSave,
+          time: Date.now()
+        }));
+        window.dispatchEvent(new CustomEvent('kroma:features-updated', {
+          detail: {
+            key,
+            enabled: current.enabled,
+            regionRestricted: current.region_restricted,
+            restrictionMessage: messageToSave
+          }
+        }));
+      } catch {}
+    } catch (err: any) {
+      console.error('Save message error:', err);
+      setErrorMessage(`Failed to save notice for ${key}: ${err.message || 'Request failed'}`);
     } finally {
       setSavingKey(null);
     }
@@ -164,6 +229,22 @@ export const AdminFeatureRegionalControl: React.FC = () => {
           <span>Refresh States</span>
         </button>
       </div>
+
+      {/* Error Alert Banner */}
+      {errorMessage && (
+        <div className="p-4 rounded-2xl bg-rose-500/15 border border-rose-500/40 text-rose-200 text-xs flex items-center justify-between gap-3 shadow-lg animate-in fade-in">
+          <div className="flex items-center gap-2.5">
+            <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+            <span>{errorMessage}</span>
+          </div>
+          <button
+            onClick={() => setErrorMessage(null)}
+            className="p-1 rounded text-rose-400 hover:text-white hover:bg-rose-500/20"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Admin Confirmation Alert Banner (Explicit confirmation when Restricted ON is clicked) */}
       {adminConfirmation && (
@@ -258,7 +339,11 @@ export const AdminFeatureRegionalControl: React.FC = () => {
                       : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
                   }`}
                 >
-                  <AlertTriangle className="w-3.5 h-3.5" />
+                  {isSaving ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                  )}
                   <span>{isRestricted ? 'Restricted ON' : 'Set Restricted ON'}</span>
                 </button>
               </div>
@@ -319,7 +404,7 @@ export const AdminFeatureRegionalControl: React.FC = () => {
                           : 'bg-rose-500/20 text-rose-300 border border-rose-500/40 hover:bg-rose-500/30'
                       }`}
                     >
-                      {state.enabled ? <Unlock className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
+                      {isSaving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : state.enabled ? <Unlock className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
                       <span>{state.enabled ? 'Enabled (ON)' : 'Disabled (OFF)'}</span>
                     </button>
                   </div>
@@ -339,7 +424,7 @@ export const AdminFeatureRegionalControl: React.FC = () => {
                           : 'bg-slate-800 text-slate-400 border border-slate-700 hover:text-white'
                       }`}
                     >
-                      <AlertTriangle className="w-3.5 h-3.5" />
+                      {isSaving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <AlertTriangle className="w-3.5 h-3.5" />}
                       <span>{state.region_restricted ? 'Restricted ON' : 'Restricted OFF'}</span>
                     </button>
                   </div>
@@ -376,9 +461,10 @@ export const AdminFeatureRegionalControl: React.FC = () => {
                     <button
                       onClick={() => handleSaveMessage(feat.key)}
                       disabled={isSaving}
-                      className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition-colors shrink-0 cursor-pointer"
+                      className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition-colors shrink-0 cursor-pointer flex items-center gap-1"
                     >
-                      Save Notice
+                      {isSaving && <RefreshCw className="w-3 h-3 animate-spin" />}
+                      <span>Save Notice</span>
                     </button>
                   </div>
                 </div>

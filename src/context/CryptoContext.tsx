@@ -141,14 +141,46 @@ export const CryptoProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setRegionModalState(prev => ({ ...prev, open: false }));
   };
 
-  useEffect(() => {
-    fetch(`${import.meta.env.VITE_API_URL || ''}/api/features`)
-      .then(r => r.ok ? r.json() : Promise.reject(new Error('feature service unavailable')))
-      .then(data => {
+  const refreshFeatures = async () => {
+    try {
+      const r = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/features`);
+      if (r.ok) {
+        const data = await r.json();
         if (data.features) setFeatureFlags(prev => ({ ...prev, ...data.features }));
         if (data.regional) setRegionalRestrictions(prev => ({ ...prev, ...data.regional }));
-      })
-      .catch(() => {});
+      }
+    } catch {}
+  };
+
+  useEffect(() => {
+    refreshFeatures();
+
+    const handleFeatureEvent = (e: any) => {
+      const { key, enabled, regionRestricted } = e?.detail || {};
+      if (key) {
+        if (enabled !== undefined) {
+          setFeatureFlags(prev => ({ ...prev, [key]: Boolean(enabled) }));
+        }
+        if (regionRestricted !== undefined) {
+          setRegionalRestrictions(prev => ({ ...prev, [key]: Boolean(regionRestricted) }));
+        }
+      }
+      refreshFeatures();
+    };
+
+    const handleStorageEvent = (e: StorageEvent) => {
+      if (e.key === 'kroma_feature_settings_sync') {
+        refreshFeatures();
+      }
+    };
+
+    window.addEventListener('kroma:features-updated', handleFeatureEvent);
+    window.addEventListener('storage', handleStorageEvent);
+
+    return () => {
+      window.removeEventListener('kroma:features-updated', handleFeatureEvent);
+      window.removeEventListener('storage', handleStorageEvent);
+    };
   }, []);
 
   const refreshWallet = async () => {

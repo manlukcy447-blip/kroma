@@ -863,10 +863,14 @@ app.get('/api/admin/features', requireAdmin, async (_req, res) => {
   res.json({ features: rows });
 });
 
-app.put('/api/admin/features/:key', requireAdmin, async (req, res) => {
+const handleFeatureAdminUpdate = async (req, res) => {
   const enabled = req.body?.enabled !== undefined ? Boolean(req.body?.enabled) : undefined;
-  const regionRestricted = req.body?.regionRestricted !== undefined ? Boolean(req.body?.regionRestricted) : undefined;
-  const restrictionMessage = req.body?.restrictionMessage !== undefined ? String(req.body?.restrictionMessage) : undefined;
+  const regionRestricted = (req.body?.regionRestricted !== undefined) 
+    ? Boolean(req.body.regionRestricted) 
+    : (req.body?.region_restricted !== undefined ? Boolean(req.body.region_restricted) : undefined);
+  const restrictionMessage = (req.body?.restrictionMessage !== undefined) 
+    ? String(req.body.restrictionMessage) 
+    : (req.body?.restriction_message !== undefined ? String(req.body.restriction_message) : undefined);
 
   const current = await pool.query('SELECT * FROM feature_settings WHERE key=$1', [req.params.key]);
   const newEnabled = enabled !== undefined ? enabled : (current.rows[0] ? current.rows[0].enabled : true);
@@ -886,8 +890,11 @@ app.put('/api/admin/features/:key', requireAdmin, async (req, res) => {
     [req.params.key, newEnabled, newRegion, newMsg, req.admin.adminId]
   );
   await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)', [req.admin.adminId, 'update', 'feature', req.params.key, JSON.stringify({ enabled: newEnabled, regionRestricted: newRegion })]);
-  res.json({ feature: rows[0] });
-});
+  res.json({ feature: rows[0], success: true });
+};
+
+app.put('/api/admin/features/:key', requireAdmin, handleFeatureAdminUpdate);
+app.post('/api/admin/features/:key', requireAdmin, handleFeatureAdminUpdate);
 
 // EARN & YIELD USER APIS
 app.get('/api/earn/products', async (_req, res) => {
@@ -1026,6 +1033,34 @@ app.delete('/api/admin/earn/products/:id', requireAdmin, async (req, res) => {
   }
 });
 
+app.post('/api/admin/earn/products/:id/toggle-region', requireAdmin, async (req, res) => {
+  try {
+    const current = await pool.query('SELECT region_restricted FROM earn_products WHERE id=$1', [req.params.id]);
+    if (!current.rowCount) return res.status(404).json({ error: 'Earn product not found' });
+    const nextVal = !current.rows[0].region_restricted;
+    const { rows } = await pool.query('UPDATE earn_products SET region_restricted=$1, updated_at=NOW() WHERE id=$2 RETURNING *', [nextVal, req.params.id]);
+    await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)', [req.admin.adminId, 'toggle_region', 'earn_product', req.params.id, JSON.stringify({ regionRestricted: nextVal })]);
+    res.json({ success: true, regionRestricted: nextVal, product: rows[0] });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to toggle earn product region' });
+  }
+});
+
+app.post('/api/admin/earn/products/:id/toggle-status', requireAdmin, async (req, res) => {
+  try {
+    const current = await pool.query('SELECT status FROM earn_products WHERE id=$1', [req.params.id]);
+    if (!current.rowCount) return res.status(404).json({ error: 'Earn product not found' });
+    const nextVal = current.rows[0].status === 'active' ? 'paused' : 'active';
+    const { rows } = await pool.query('UPDATE earn_products SET status=$1, updated_at=NOW() WHERE id=$2 RETURNING *', [nextVal, req.params.id]);
+    await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)', [req.admin.adminId, 'toggle_status', 'earn_product', req.params.id, JSON.stringify({ status: nextVal })]);
+    res.json({ success: true, status: nextVal, product: rows[0] });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to toggle earn product status' });
+  }
+});
+
 // REWARDS HUB USER APIS
 app.get('/api/rewards/items', async (_req, res) => {
   try {
@@ -1145,6 +1180,34 @@ app.delete('/api/admin/rewards/items/:id', requireAdmin, async (req, res) => {
   }
 });
 
+app.post('/api/admin/rewards/items/:id/toggle-region', requireAdmin, async (req, res) => {
+  try {
+    const current = await pool.query('SELECT region_restricted FROM reward_items WHERE id=$1', [req.params.id]);
+    if (!current.rowCount) return res.status(404).json({ error: 'Reward item not found' });
+    const nextVal = !current.rows[0].region_restricted;
+    const { rows } = await pool.query('UPDATE reward_items SET region_restricted=$1, updated_at=NOW() WHERE id=$2 RETURNING *', [nextVal, req.params.id]);
+    await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)', [req.admin.adminId, 'toggle_region', 'reward_item', req.params.id, JSON.stringify({ regionRestricted: nextVal })]);
+    res.json({ success: true, regionRestricted: nextVal, reward: rows[0] });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to toggle reward item region' });
+  }
+});
+
+app.post('/api/admin/rewards/items/:id/toggle-status', requireAdmin, async (req, res) => {
+  try {
+    const current = await pool.query('SELECT status FROM reward_items WHERE id=$1', [req.params.id]);
+    if (!current.rowCount) return res.status(404).json({ error: 'Reward item not found' });
+    const nextVal = current.rows[0].status === 'active' ? 'paused' : 'active';
+    const { rows } = await pool.query('UPDATE reward_items SET status=$1, updated_at=NOW() WHERE id=$2 RETURNING *', [nextVal, req.params.id]);
+    await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)', [req.admin.adminId, 'toggle_status', 'reward_item', req.params.id, JSON.stringify({ status: nextVal })]);
+    res.json({ success: true, status: nextVal, reward: rows[0] });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to toggle reward item status' });
+  }
+});
+
 // TRADING APIS (FULL ADMIN ACCESS)
 app.get('/api/trading/pairs', async (_req, res) => {
   try {
@@ -1235,13 +1298,55 @@ app.delete('/api/admin/trading/pairs/:id', requireAdmin, async (req, res) => {
   }
 });
 
+app.post('/api/admin/trading/pairs/:id/toggle-region', requireAdmin, async (req, res) => {
+  try {
+    const current = await pool.query('SELECT region_restricted FROM trading_pairs WHERE id=$1', [req.params.id]);
+    if (!current.rowCount) return res.status(404).json({ error: 'Trading pair not found' });
+    const nextVal = !current.rows[0].region_restricted;
+    const { rows } = await pool.query('UPDATE trading_pairs SET region_restricted=$1, updated_at=NOW() WHERE id=$2 RETURNING *', [nextVal, req.params.id]);
+    res.json({ success: true, regionRestricted: nextVal, pair: rows[0] });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to toggle trading pair region' });
+  }
+});
+
+app.post('/api/admin/trading/pairs/:id/toggle-status', requireAdmin, async (req, res) => {
+  try {
+    const current = await pool.query('SELECT status FROM trading_pairs WHERE id=$1', [req.params.id]);
+    if (!current.rowCount) return res.status(404).json({ error: 'Trading pair not found' });
+    const nextVal = current.rows[0].status === 'active' ? 'halted' : 'active';
+    const { rows } = await pool.query('UPDATE trading_pairs SET status=$1, updated_at=NOW() WHERE id=$2 RETURNING *', [nextVal, req.params.id]);
+    res.json({ success: true, status: nextVal, pair: rows[0] });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to toggle trading pair status' });
+  }
+});
+
+app.post('/api/admin/trading/cancel-all-orders', requireAdmin, async (req, res) => {
+  try {
+    await pool.query("UPDATE spot_orders SET status='cancelled', updated_at=NOW() WHERE status='open'");
+    await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)', [req.admin.adminId, 'cancel_all', 'orders', 'all', '{}']);
+    res.json({ success: true, message: 'All open orders cancelled.' });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to cancel open orders' });
+  }
+});
+
 app.get('/api/admin/trading/settings', requireAdmin, async (_req, res) => {
   const { rows } = await pool.query("SELECT maker_fee AS \"makerFee\", taker_fee AS \"takerFee\", halt_all_trading AS \"haltAllTrading\", region_restricted AS \"regionRestricted\" FROM trading_settings WHERE id='global'");
   res.json({ settings: rows[0] || { makerFee: 0.1, takerFee: 0.1, haltAllTrading: false, regionRestricted: false } });
 });
 
-app.put('/api/admin/trading/settings', requireAdmin, async (req, res) => {
-  const { makerFee, takerFee, haltAllTrading, regionRestricted } = req.body || {};
+const handleTradingSettingsUpdate = async (req, res) => {
+  const body = req.body || {};
+  const makerFee = body.makerFee !== undefined ? body.makerFee : body.makerFeePercent;
+  const takerFee = body.takerFee !== undefined ? body.takerFee : body.takerFeePercent;
+  const haltAllTrading = body.haltAllTrading;
+  const regionRestricted = body.regionRestricted;
+
   try {
     const { rows } = await pool.query(
       `INSERT INTO trading_settings(id, maker_fee, taker_fee, halt_all_trading, region_restricted, updated_at)
@@ -1256,12 +1361,15 @@ app.put('/api/admin/trading/settings', requireAdmin, async (req, res) => {
       [makerFee !== undefined ? Number(makerFee) : 0.1, takerFee !== undefined ? Number(takerFee) : 0.1, haltAllTrading !== undefined ? Boolean(haltAllTrading) : false, regionRestricted !== undefined ? Boolean(regionRestricted) : false]
     );
     await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)', [req.admin.adminId, 'update', 'trading_settings', 'global', JSON.stringify(req.body)]);
-    res.json({ settings: rows[0] });
+    res.json({ settings: rows[0], success: true });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Unable to update trading settings' });
   }
-});
+};
+
+app.put('/api/admin/trading/settings', requireAdmin, handleTradingSettingsUpdate);
+app.post('/api/admin/trading/settings', requireAdmin, handleTradingSettingsUpdate);
 
 app.get('/api/admin/orders', requireAdmin, async (_req, res) => {
   try {
