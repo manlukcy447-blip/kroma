@@ -601,8 +601,21 @@ app.post('/api/wallet/withdraw', requireUser, async (req,res)=>{
   catch(e){ await client.query('ROLLBACK').catch(()=>{}); if(String(e.message).startsWith('INSUFFICIENT_')) return res.status(400).json({error:`Insufficient ${asset} balance.`}); console.error(e); res.status(500).json({error:'Unable to create withdrawal'}); } finally { client.release(); }
 });
 
-async function checkFeatureAvailable(featureKey) {
+async function checkFeatureAvailable(featureKey, userId = null) {
   try {
+    if (userId) {
+      const userFeat = await pool.query(
+        'SELECT enabled, region_restricted AS "regionRestricted", restriction_message AS "restrictionMessage" FROM user_feature_settings WHERE user_id=$1 AND key=$2',
+        [userId, featureKey]
+      );
+      if (userFeat.rows[0]) {
+        return {
+          enabled: Boolean(userFeat.rows[0].enabled),
+          regionRestricted: Boolean(userFeat.rows[0].regionRestricted),
+          message: userFeat.rows[0].restrictionMessage || 'Service Not Available in Your Region. Regulatory compliance restricts participation in this feature from your jurisdiction.'
+        };
+      }
+    }
     const { rows } = await pool.query('SELECT enabled, region_restricted AS "regionRestricted", restriction_message AS "restrictionMessage" FROM feature_settings WHERE key=$1', [featureKey]);
     if (!rows[0]) return { enabled: true, regionRestricted: false, message: '' };
     return {
@@ -625,7 +638,7 @@ app.post('/api/wallet/convert', requireUser, async (req, res) => {
     return res.status(400).json({ error: 'Invalid conversion parameters.' });
   }
 
-  const feat = await checkFeatureAvailable('convert');
+  const feat = await checkFeatureAvailable('convert', req.user.userId);
   if (!feat.enabled) {
     return res.status(403).json({ error: 'Convert is currently offline for scheduled maintenance.' });
   }
@@ -664,7 +677,7 @@ app.post('/api/wallet/convert', requireUser, async (req, res) => {
 });
 
 app.post('/api/p2p/participate', requireUser, async (req, res) => {
-  const feat = await checkFeatureAvailable('p2p');
+  const feat = await checkFeatureAvailable('p2p', req.user.userId);
   if (!feat.enabled) {
     return res.status(403).json({ error: 'P2P Trading is currently offline for scheduled maintenance.' });
   }
@@ -675,7 +688,7 @@ app.post('/api/p2p/participate', requireUser, async (req, res) => {
 });
 
 app.post('/api/wallet/orders', requireUser, async (req,res)=>{
-  const feat = await checkFeatureAvailable('trading');
+  const feat = await checkFeatureAvailable('trading', req.user.userId);
   if (!feat.enabled) {
     return res.status(403).json({ error: 'Trading is currently suspended by administration.' });
   }
@@ -847,14 +860,41 @@ app.delete('/api/admin/deposit-addresses/:id', requireAdmin, async (req, res) =>
   } catch (e) { console.error(e); res.status(500).json({ error: 'Unable to delete address' }); }
 });
 
-app.get('/api/features', async (_req, res) => {
+app.get('/api/features', async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT key, enabled, region_restricted AS "regionRestricted", restriction_message AS "restrictionMessage" FROM feature_settings ORDER BY key');
     const flags = Object.fromEntries(rows.map(r => [r.key, r.enabled]));
     const regional = Object.fromEntries(rows.map(r => [r.key, r.regionRestricted]));
-    res.json({ features: flags, regional, featureDetails: rows });
+    const messages = Object.fromEntries(rows.map(r => [r.key, r.restrictionMessage]));
+
+    // Check if an authenticated user is requesting, and apply individual overrides
+    try {
+      const token = getUserToken(req);
+      if (token) {
+        const u = verifyUserToken(token);
+        if (u && u.userId) {
+          const userFeat = await pool.query(
+            'SELECT key, enabled, region_restricted AS "regionRestricted", restriction_message AS "restrictionMessage" FROM user_feature_settings WHERE user_id=$1',
+            [u.userId]
+          );
+          for (const uf of userFeat.rows) {
+            if (uf.enabled !== undefined && uf.enabled !== null) {
+              flags[uf.key] = Boolean(uf.enabled);
+            }
+            if (uf.regionRestricted !== undefined && uf.regionRestricted !== null) {
+              regional[uf.key] = Boolean(uf.regionRestricted);
+            }
+            if (uf.restrictionMessage) {
+              messages[uf.key] = uf.restrictionMessage;
+            }
+          }
+        }
+      }
+    } catch (_) {}
+
+    res.json({ features: flags, regional, messages, featureDetails: rows });
   } catch {
-    res.json({ features: {}, regional: {}, featureDetails: [] });
+    res.json({ features: {}, regional: {}, messages: {}, featureDetails: [] });
   }
 });
 
@@ -896,6 +936,140 @@ const handleFeatureAdminUpdate = async (req, res) => {
 app.put('/api/admin/features/:key', requireAdmin, handleFeatureAdminUpdate);
 app.post('/api/admin/features/:key', requireAdmin, handleFeatureAdminUpdate);
 
+// USER-SPECIFIC FEATURE FLAGS & REGIONAL GATING ADMIN ENDPOINTS
+app.get('/api/admin/users/:userId/features', requireAdmin, async (req, res) => {
+  try {
+    const userCheck = await pool.query('SELECT id, email, status FROM users WHERE id=$1', [req.params.userId]);
+    if (!userCheck.rowCount) return res.status(404).json({ error: 'User not found' });
+
+    // Global settings
+    const { rows: globalRows } = await pool.query(
+      'SELECT key, enabled, region_restricted AS "regionRestricted", restriction_message AS "restrictionMessage" FROM feature_settings ORDER BY key'
+    );
+    const globalMap = new Map(globalRows.map(r => [r.key, r]));
+
+    // User settings
+    const { rows: userRows } = await pool.query(
+      'SELECT key, enabled, region_restricted AS "regionRestricted", restriction_message AS "restrictionMessage", updated_at AS "updatedAt" FROM user_feature_settings WHERE user_id=$1',
+      [req.params.userId]
+    );
+    const userMap = new Map(userRows.map(r => [r.key, r]));
+
+    const FEATURE_KEYS = [
+      'earn', 'rewards', 'p2p', 'convert', 'trading', 
+      'buySell', 'deposits', 'withdrawals', 'referrals', 'kyc'
+    ];
+
+    const features = FEATURE_KEYS.map(key => {
+      const glob = globalMap.get(key) || { enabled: true, regionRestricted: false, restrictionMessage: '' };
+      const usr = userMap.get(key);
+      const isOverridden = Boolean(usr);
+      return {
+        key,
+        enabled: usr ? Boolean(usr.enabled) : Boolean(glob.enabled),
+        regionRestricted: usr ? Boolean(usr.regionRestricted) : Boolean(glob.regionRestricted),
+        restrictionMessage: usr ? (usr.restrictionMessage ?? glob.restrictionMessage ?? '') : (glob.restrictionMessage ?? ''),
+        isOverridden,
+        globalEnabled: Boolean(glob.enabled),
+        globalRegionRestricted: Boolean(glob.regionRestricted),
+        updatedAt: usr?.updatedAt || null,
+      };
+    });
+
+    res.json({ user: userCheck.rows[0], features });
+  } catch (e) {
+    console.error('Fetch user features error:', e);
+    res.status(500).json({ error: 'Unable to load user feature settings' });
+  }
+});
+
+const handleUserFeatureAdminUpdate = async (req, res) => {
+  const userId = req.params.userId;
+  const key = req.params.key;
+
+  const enabled = req.body?.enabled !== undefined ? Boolean(req.body?.enabled) : undefined;
+  const regionRestricted = (req.body?.regionRestricted !== undefined) 
+    ? Boolean(req.body.regionRestricted) 
+    : (req.body?.region_restricted !== undefined ? Boolean(req.body.region_restricted) : undefined);
+  const restrictionMessage = (req.body?.restrictionMessage !== undefined) 
+    ? String(req.body.restrictionMessage) 
+    : (req.body?.restriction_message !== undefined ? String(req.body.restriction_message) : undefined);
+
+  try {
+    const userCheck = await pool.query('SELECT id, email FROM users WHERE id=$1', [userId]);
+    if (!userCheck.rowCount) return res.status(404).json({ error: 'User not found' });
+
+    const current = await pool.query('SELECT * FROM user_feature_settings WHERE user_id=$1 AND key=$2', [userId, key]);
+    const glob = await pool.query('SELECT * FROM feature_settings WHERE key=$1', [key]);
+
+    const fallbackEnabled = glob.rows[0] ? Boolean(glob.rows[0].enabled) : true;
+    const fallbackRegion = glob.rows[0] ? Boolean(glob.rows[0].region_restricted) : false;
+    const fallbackMsg = glob.rows[0]?.restriction_message || 'Service Not Available in Your Region. Regulatory compliance restricts participation in this feature from your jurisdiction.';
+
+    const newEnabled = enabled !== undefined ? enabled : (current.rows[0] ? current.rows[0].enabled : fallbackEnabled);
+    const newRegion = regionRestricted !== undefined ? regionRestricted : (current.rows[0] ? current.rows[0].region_restricted : fallbackRegion);
+    const newMsg = restrictionMessage !== undefined ? restrictionMessage : (current.rows[0]?.restriction_message ?? fallbackMsg);
+
+    const id = current.rows[0]?.id || crypto.randomUUID();
+
+    const { rows } = await pool.query(
+      `INSERT INTO user_feature_settings(id, user_id, key, enabled, region_restricted, restriction_message, updated_at)
+       VALUES($1, $2, $3, $4, $5, $6, NOW())
+       ON CONFLICT(user_id, key) DO UPDATE SET
+         enabled = EXCLUDED.enabled,
+         region_restricted = EXCLUDED.region_restricted,
+         restriction_message = EXCLUDED.restriction_message,
+         updated_at = NOW()
+       RETURNING id, user_id AS "userId", key, enabled, region_restricted AS "regionRestricted", restriction_message AS "restrictionMessage", updated_at AS "updatedAt"`,
+      [id, userId, key, newEnabled, newRegion, newMsg]
+    );
+
+    await pool.query('INSERT INTO audit_logs(admin_id, action, entity_type, entity_id, details) VALUES($1, $2, $3, $4, $5)', [
+      req.admin.adminId,
+      'update_user_feature',
+      'user_feature_settings',
+      userId,
+      JSON.stringify({ userId, userEmail: userCheck.rows[0].email, key, enabled: newEnabled, regionRestricted: newRegion, restrictionMessage: newMsg })
+    ]);
+
+    res.json({ success: true, feature: rows[0] });
+  } catch (e) {
+    console.error('Update user feature error:', e);
+    res.status(500).json({ error: 'Unable to update user feature setting' });
+  }
+};
+
+app.put('/api/admin/users/:userId/features/:key', requireAdmin, handleUserFeatureAdminUpdate);
+app.post('/api/admin/users/:userId/features/:key', requireAdmin, handleUserFeatureAdminUpdate);
+
+app.delete('/api/admin/users/:userId/features/:key', requireAdmin, async (req, res) => {
+  const { userId, key } = req.params;
+  try {
+    await pool.query('DELETE FROM user_feature_settings WHERE user_id=$1 AND key=$2', [userId, key]);
+    await pool.query('INSERT INTO audit_logs(admin_id, action, entity_type, entity_id, details) VALUES($1, $2, $3, $4, $5)', [
+      req.admin.adminId, 'delete_user_feature_override', 'user_feature_settings', userId, JSON.stringify({ userId, key })
+    ]);
+    res.json({ success: true, message: `Feature ${key} reset to global defaults for user` });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Unable to reset feature for user' });
+  }
+});
+
+app.post('/api/admin/users/:userId/features/reset', requireAdmin, async (req, res) => {
+  const { userId } = req.params;
+  try {
+    await pool.query('DELETE FROM user_feature_settings WHERE user_id=$1', [userId]);
+    await pool.query('INSERT INTO audit_logs(admin_id, action, entity_type, entity_id, details) VALUES($1, $2, $3, $4, $5)', [
+      req.admin.adminId, 'reset_all_user_features', 'user_feature_settings', userId, JSON.stringify({ userId })
+    ]);
+    res.json({ success: true, message: 'All features reset to global platform settings for this user.' });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Unable to reset user features' });
+  }
+});
+
 // EARN & YIELD USER APIS
 app.get('/api/earn/products', async (_req, res) => {
   try {
@@ -915,7 +1089,7 @@ app.post('/api/earn/subscribe', requireUser, async (req, res) => {
     return res.status(400).json({ error: 'Please specify a valid subscription amount.' });
   }
 
-  const feat = await checkFeatureAvailable('earn');
+  const feat = await checkFeatureAvailable('earn', req.user.userId);
   if (!feat.enabled) {
     return res.status(403).json({ error: 'Earn & Yield features are currently offline.' });
   }
@@ -1077,7 +1251,7 @@ app.post('/api/rewards/claim', requireUser, async (req, res) => {
   const { rewardId } = req.body || {};
   if (!rewardId) return res.status(400).json({ error: 'Reward ID is required.' });
 
-  const feat = await checkFeatureAvailable('rewards');
+  const feat = await checkFeatureAvailable('rewards', req.user.userId);
   if (!feat.enabled) {
     return res.status(403).json({ error: 'Rewards Hub is currently offline.' });
   }

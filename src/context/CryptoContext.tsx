@@ -126,6 +126,7 @@ export const CryptoProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [regionalRestrictions, setRegionalRestrictions] = useState<Record<string, boolean>>({
     p2p: false, earn: false, rewards: false, convert: false, trading: false
   });
+  const [restrictionMessages, setRestrictionMessages] = useState<Record<string, string>>({});
   const [regionModalState, setRegionModalState] = useState<{ open: boolean; feature: string; message: string }>({
     open: false, feature: '', message: ''
   });
@@ -143,11 +144,12 @@ export const CryptoProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const refreshFeatures = async () => {
     try {
-      const r = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/features`);
+      const r = await authFetch(`${import.meta.env.VITE_API_URL || ''}/api/features`);
       if (r.ok) {
         const data = await r.json();
         if (data.features) setFeatureFlags(prev => ({ ...prev, ...data.features }));
         if (data.regional) setRegionalRestrictions(prev => ({ ...prev, ...data.regional }));
+        if (data.messages) setRestrictionMessages(prev => ({ ...prev, ...data.messages }));
       }
     } catch {}
   };
@@ -571,7 +573,7 @@ export const CryptoProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         p2p: 'P2P Trading',
         convert: 'Convert Hub',
       };
-      triggerRegionRestricted(names[featureKey] || 'This Service');
+      triggerRegionRestricted(names[featureKey] || 'This Service', restrictionMessages[featureKey]);
     }
     setCurrentTab(tab);
   };

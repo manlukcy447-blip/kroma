@@ -570,7 +570,7 @@ export const AdminView: React.FC = () => {
 
         {/* TAB 2: FEATURE FLAGS & REGIONAL GATING */}
         {activeTab === 'features' && (
-          <AdminFeatureRegionalControl />
+          <AdminFeatureRegionalControl users={users} />
         )}
 
         {/* TAB 3: EARN & YIELD */}

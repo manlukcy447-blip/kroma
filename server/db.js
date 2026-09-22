@@ -90,6 +90,22 @@ async function ensureSchema(db) {
       ).catch(() => {});
     }
 
+    // Individual User Feature Settings & Regional Restrictions table
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS user_feature_settings (
+        id UUID PRIMARY KEY,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        key TEXT NOT NULL,
+        enabled BOOLEAN NOT NULL DEFAULT TRUE,
+        region_restricted BOOLEAN NOT NULL DEFAULT FALSE,
+        restriction_message TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE(user_id, key)
+      )
+    `);
+    await db.query('CREATE INDEX IF NOT EXISTS user_feature_settings_user_idx ON user_feature_settings(user_id)').catch(() => {});
+
     // Earn products table
     await db.query(`
       CREATE TABLE IF NOT EXISTS earn_products (

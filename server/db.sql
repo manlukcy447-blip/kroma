@@ -69,6 +69,19 @@ CREATE TABLE IF NOT EXISTS user_deposit_addresses (
 );
 CREATE INDEX IF NOT EXISTS user_deposit_addresses_user_idx ON user_deposit_addresses(user_id, asset, network);
 
+CREATE TABLE IF NOT EXISTS user_feature_settings (
+  id UUID PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  key TEXT NOT NULL,
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  region_restricted BOOLEAN NOT NULL DEFAULT FALSE,
+  restriction_message TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(user_id, key)
+);
+CREATE INDEX IF NOT EXISTS user_feature_settings_user_idx ON user_feature_settings(user_id);
+
 CREATE TABLE IF NOT EXISTS password_reset_tokens (
   id UUID PRIMARY KEY,
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
