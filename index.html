@@ -25,21 +25,37 @@
     <link rel="alternate icon" href="/favicon.ico" />
 
     <script>
-      // Gracefully handle Vite HMR WebSocket connection logs in AI Studio preview iframe
+      // Gracefully silence Vite HMR WebSocket connection errors in AI Studio iframe environment
       (function() {
         const origConsoleError = console.error;
+        const origConsoleWarn = console.warn;
+        
         console.error = function(...args) {
-          if (args.length > 0 && typeof args[0] === 'string' && (args[0].includes('[vite]') || args[0].toLowerCase().includes('websocket'))) {
-            console.warn(...args);
+          if (args.some(a => typeof a === 'string' && (a.includes('[vite]') || a.toLowerCase().includes('websocket')))) {
             return;
           }
           origConsoleError.apply(console, args);
         };
+
+        console.warn = function(...args) {
+          if (args.some(a => typeof a === 'string' && (a.includes('[vite]') || a.toLowerCase().includes('websocket')))) {
+            return;
+          }
+          origConsoleWarn.apply(console, args);
+        };
+
         window.addEventListener('unhandledrejection', function(event) {
           if (event.reason && typeof event.reason.message === 'string' && (event.reason.message.includes('WebSocket') || event.reason.message.includes('[vite]'))) {
             event.preventDefault();
           }
         });
+
+        window.addEventListener('error', function(event) {
+          if (event && typeof event.message === 'string' && (event.message.includes('[vite]') || event.message.includes('WebSocket'))) {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }, true);
       })();
     </script>
   </head>
