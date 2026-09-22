@@ -23,6 +23,7 @@ import {
   Menu,
   X
 } from 'lucide-react';
+import { PWAInstallButton } from './PWAInstallButton';
 
 export const Header: React.FC = () => {
   const { user: authUser, logout } = useAuth();
@@ -204,6 +205,11 @@ export const Header: React.FC = () => {
 
         {/* Right action controls */}
         <div className="flex items-center space-x-3">
+          {/* PWA Install Button (desktop & tablet) */}
+          <div className="hidden md:block">
+            <PWAInstallButton variant="compact" />
+          </div>
+
           {/* Quick Deposit action */}
           <button
             id="btn-quick-deposit"
@@ -454,7 +460,8 @@ export const Header: React.FC = () => {
               )}
             </button>
           ))}
-          <div className="pt-2">
+          <div className="pt-2 space-y-2">
+            <PWAInstallButton variant="full" />
             <button
               onClick={() => {
                 openDepositModal('USDT');

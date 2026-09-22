@@ -34,6 +34,7 @@ import { AdminView } from './admin/AdminView';
 import { AuthProvider, useAuth } from './auth';
 import { ShieldAlert, ArrowRight, Globe, Lock } from 'lucide-react';
 import { LoginPage, SignupPage, ForgotPasswordPage, ResetPasswordPage } from './auth/AuthPages';
+import { PWAInstallModal } from './components/common/PWAInstallModal';
 
 const UnavailableView: React.FC<{label:string}> = ({label}) => {
   const { setCurrentTab } = useCrypto();
@@ -227,6 +228,7 @@ export default function App() {
   return (
     <AuthProvider>
       <MainRouter />
+      <PWAInstallModal />
     </AuthProvider>
   );
 }
