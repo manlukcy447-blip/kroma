@@ -585,6 +585,212 @@ app.post('/api/wallet/deposit-intent', requireUser, async (req,res)=>{
   }
 });
 
+// Real-time Intended Deposit Logger (Triggered when user clicks "Copy Address" on Receive modal)
+app.post('/api/wallet/intended-deposit', requireUser, async (req, res) => {
+  try {
+    const asset = String(req.body?.asset || '').toUpperCase();
+    const network = String(req.body?.network || '').trim();
+    const address = String(req.body?.address || '').trim();
+    if (!asset || !network) return res.status(400).json({ error: 'Asset and network are required' });
+
+    const userResult = await pool.query('SELECT id, email FROM users WHERE id = $1', [req.user.userId]);
+    const userEmail = userResult.rows[0]?.email || req.user.email || 'user@kroma.exchange';
+    const now = new Date();
+    const intentId = crypto.randomUUID();
+
+    await pool.query(
+      `INSERT INTO intended_deposits (id, user_id, user_email, asset, network, address, status, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, 'copied_address', NOW())`,
+      [intentId, req.user.userId, userEmail, asset, network, address]
+    );
+
+    const notifId = crypto.randomUUID();
+    const title = `Intended Deposit Alert: ${asset} (${network})`;
+    const message = `User ${userEmail} (ID: ${req.user.userId}) copied receiving address for ${asset} on ${network} intending to make a deposit.`;
+
+    await pool.query(
+      `INSERT INTO admin_notifications (id, type, user_id, user_email, title, message, data, created_at)
+       VALUES ($1, 'intended_deposit', $2, $3, $4, $5, $6, NOW())`,
+      [
+        notifId,
+        req.user.userId,
+        userEmail,
+        title,
+        message,
+        JSON.stringify({
+          intentId,
+          userId: req.user.userId,
+          userEmail,
+          asset,
+          network,
+          address,
+          timestamp: now.toISOString()
+        })
+      ]
+    );
+
+    await pool.query(
+      `INSERT INTO audit_logs(action, entity_type, entity_id, details)
+       VALUES('intended_deposit', 'user', $1, $2)`,
+      [req.user.userId, JSON.stringify({ userEmail, asset, network, address, timestamp: now.toISOString() })]
+    );
+
+    res.json({ success: true, message: 'Admin notified of intended deposit.', intentId });
+  } catch (e) {
+    console.error('Intended deposit notice error:', e);
+    res.status(500).json({ error: 'Unable to record intended deposit' });
+  }
+});
+
+// User Transaction Confirmation Hub: Fetch user deposits and withdrawals
+app.get('/api/wallet/confirmation-hub/transactions', requireUser, async (req, res) => {
+  try {
+    const deposits = await pool.query(
+      `SELECT d.id, d.asset, d.network, d.amount, d.tx_hash AS "txHash", d.status, d.confirmations, d.created_at AS "createdAt", d.updated_at AS "updatedAt"
+       FROM deposit_requests d
+       WHERE d.user_id = $1
+       ORDER BY d.created_at DESC
+       LIMIT 50`,
+      [req.user.userId]
+    );
+    const withdrawals = await pool.query(
+      `SELECT w.id, w.asset, w.network, w.address, w.amount, w.fee, w.status, w.tx_hash AS "txHash", w.failure_reason AS "failureReason", w.created_at AS "createdAt", w.updated_at AS "updatedAt"
+       FROM withdrawal_requests w
+       WHERE w.user_id = $1
+       ORDER BY w.created_at DESC
+       LIMIT 50`,
+      [req.user.userId]
+    );
+    res.json({ deposits: deposits.rows, withdrawals: withdrawals.rows });
+  } catch (e) {
+    console.error('Confirmation hub fetch error:', e);
+    res.status(500).json({ error: 'Unable to load confirmation records' });
+  }
+});
+
+// User Transaction Confirmation Hub: Submit deposit confirmation for admin review
+app.post('/api/wallet/confirmation-hub/deposit-confirm', requireUser, async (req, res) => {
+  try {
+    const asset = String(req.body?.asset || '').toUpperCase();
+    const network = String(req.body?.network || '').trim();
+    const amount = req.body?.amount != null ? positiveAmount(req.body.amount) : null;
+    const txHash = String(req.body?.txHash || '').trim() || null;
+    const notes = String(req.body?.notes || '').trim();
+
+    if (!asset || !network) return res.status(400).json({ error: 'Asset and network are required' });
+
+    const userResult = await pool.query('SELECT id, email FROM users WHERE id = $1', [req.user.userId]);
+    const userEmail = userResult.rows[0]?.email || req.user.email || 'user@kroma.exchange';
+
+    const depositId = crypto.randomUUID();
+    const status = 'awaiting_approval';
+
+    await pool.query(
+      `INSERT INTO deposit_requests (id, user_id, asset, network, amount, tx_hash, status, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())`,
+      [depositId, req.user.userId, asset, network, amount, txHash, status]
+    );
+
+    await pool.query(
+      `INSERT INTO transactions (id, user_id, type, asset, amount, status, tx_hash, network, created_at)
+       VALUES ($1, $2, 'deposit', $3, $4, $5, $6, $7, NOW())`,
+      [depositId, req.user.userId, asset, amount || 0, status, txHash, network]
+    );
+
+    const notifId = crypto.randomUUID();
+    const title = `Deposit Confirmation Submitted: ${userEmail}`;
+    const message = `User ${userEmail} (ID: ${req.user.userId}) submitted a deposit confirmation of ${amount ? `${amount} ${asset}` : asset} on ${network} (TxHash: ${txHash || 'None'}).`;
+
+    await pool.query(
+      `INSERT INTO admin_notifications (id, type, user_id, user_email, title, message, data, created_at)
+       VALUES ($1, 'deposit_confirmation', $2, $3, $4, $5, $6, NOW())`,
+      [
+        notifId,
+        req.user.userId,
+        userEmail,
+        title,
+        message,
+        JSON.stringify({
+          depositId,
+          userId: req.user.userId,
+          userEmail,
+          asset,
+          network,
+          amount,
+          txHash,
+          notes,
+          timestamp: new Date().toISOString()
+        })
+      ]
+    );
+
+    res.status(201).json({
+      success: true,
+      depositId,
+      message: 'Deposit confirmation successfully submitted. The administration desk has been notified and will verify your transaction.'
+    });
+  } catch (e) {
+    if (e.code === '23505') {
+      return res.status(409).json({ error: 'This transaction hash has already been submitted for confirmation.' });
+    }
+    console.error('Deposit confirmation submit error:', e);
+    res.status(500).json({ error: 'Unable to submit deposit confirmation' });
+  }
+});
+
+// User Transaction Confirmation Hub: Submit withdrawal confirmation / acknowledgment
+app.post('/api/wallet/confirmation-hub/withdrawal-inquiry', requireUser, async (req, res) => {
+  try {
+    const withdrawalId = String(req.body?.withdrawalId || '').trim();
+    const txHash = String(req.body?.txHash || '').trim() || null;
+    const notes = String(req.body?.notes || '').trim();
+
+    if (!withdrawalId) return res.status(400).json({ error: 'Withdrawal ID is required' });
+
+    const wRes = await pool.query(
+      'SELECT id, asset, network, address, amount, status FROM withdrawal_requests WHERE id = $1 AND user_id = $2',
+      [withdrawalId, req.user.userId]
+    );
+    if (!wRes.rows[0]) return res.status(404).json({ error: 'Withdrawal record not found' });
+    const w = wRes.rows[0];
+
+    const userResult = await pool.query('SELECT id, email FROM users WHERE id = $1', [req.user.userId]);
+    const userEmail = userResult.rows[0]?.email || req.user.email || 'user@kroma.exchange';
+
+    const notifId = crypto.randomUUID();
+    const title = `Withdrawal Inquiry/Confirmation: ${userEmail}`;
+    const message = `User ${userEmail} sent an update regarding withdrawal ${w.amount} ${w.asset} (Status: ${w.status}): ${notes || 'Status inquiry / confirmation request'}`;
+
+    await pool.query(
+      `INSERT INTO admin_notifications (id, type, user_id, user_email, title, message, data, created_at)
+       VALUES ($1, 'withdrawal_confirmation', $2, $3, $4, $5, $6, NOW())`,
+      [
+        notifId,
+        req.user.userId,
+        userEmail,
+        title,
+        message,
+        JSON.stringify({
+          withdrawalId,
+          userId: req.user.userId,
+          userEmail,
+          asset: w.asset,
+          network: w.network,
+          amount: w.amount,
+          txHash,
+          notes,
+          timestamp: new Date().toISOString()
+        })
+      ]
+    );
+
+    res.json({ success: true, message: 'Your message and withdrawal details have been forwarded directly to the admin desk.' });
+  } catch (e) {
+    console.error('Withdrawal confirmation inquiry error:', e);
+    res.status(500).json({ error: 'Unable to submit withdrawal inquiry' });
+  }
+});
+
 app.post('/api/wallet/withdraw', requireUser, async (req,res)=>{
   const asset=String(req.body?.asset||'').toUpperCase(), network=String(req.body?.network||'').trim(), address=String(req.body?.address||'').trim(), amount=positiveAmount(req.body?.amount);
   if(!asset||!network||address.length<10||!amount)return res.status(400).json({error:'Invalid withdrawal request'});
@@ -1650,6 +1856,60 @@ app.get('/api/admin/deposits', requireAdmin, async (_req,res)=>{
 app.get('/api/admin/withdrawals', requireAdmin, async (_req,res)=>{
   try { const {rows}=await pool.query(`SELECT w.id,w.user_id AS "userId",u.email,w.asset,w.network,w.address,w.amount,w.fee,w.status,w.tx_hash AS "txHash",w.failure_reason AS "failureReason",w.created_at AS "createdAt" FROM withdrawal_requests w JOIN users u ON u.id=w.user_id ORDER BY w.created_at DESC LIMIT 500`); res.json({withdrawals:rows}); }
   catch(e){console.error(e);res.status(500).json({error:'Unable to load withdrawals'});}
+});
+
+// Admin Notifications Center
+app.get('/api/admin/notifications', requireAdmin, async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 100, 200);
+    const { rows } = await pool.query(
+      `SELECT id, type, user_id AS "userId", user_email AS "userEmail", title, message, data, is_read AS "isRead", created_at AS "createdAt"
+       FROM admin_notifications
+       ORDER BY created_at DESC
+       LIMIT $1`,
+      [limit]
+    );
+    const unreadRes = await pool.query('SELECT COUNT(*) as count FROM admin_notifications WHERE is_read = false');
+    const unreadCount = parseInt(unreadRes.rows[0]?.count || '0', 10);
+    res.json({ notifications: rows, unreadCount });
+  } catch (e) {
+    console.error('Fetch admin notifications error:', e);
+    res.status(500).json({ error: 'Unable to load admin notifications' });
+  }
+});
+
+app.post('/api/admin/notifications/:id/read', requireAdmin, async (req, res) => {
+  try {
+    await pool.query('UPDATE admin_notifications SET is_read = true WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: 'Unable to update notification' });
+  }
+});
+
+app.post('/api/admin/notifications/mark-all-read', requireAdmin, async (_req, res) => {
+  try {
+    await pool.query('UPDATE admin_notifications SET is_read = true');
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: 'Unable to mark notifications read' });
+  }
+});
+
+// Admin Intended Deposits List
+app.get('/api/admin/intended-deposits', requireAdmin, async (_req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT i.id, i.user_id AS "userId", i.user_email AS "userEmail", i.asset, i.network, i.address, i.status, i.created_at AS "createdAt"
+       FROM intended_deposits i
+       ORDER BY i.created_at DESC
+       LIMIT 200`
+    );
+    res.json({ intendedDeposits: rows });
+  } catch (e) {
+    console.error('Fetch intended deposits error:', e);
+    res.status(500).json({ error: 'Unable to load intended deposits' });
+  }
 });
 
 

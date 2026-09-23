@@ -27,33 +27,48 @@
     <script>
       // Gracefully silence Vite HMR WebSocket connection errors in AI Studio iframe environment
       (function() {
-        const origConsoleError = console.error;
-        const origConsoleWarn = console.warn;
-        
-        console.error = function(...args) {
-          if (args.some(a => typeof a === 'string' && (a.includes('[vite]') || a.toLowerCase().includes('websocket')))) {
-            return;
+        const hasVite = (args) => {
+          try {
+            return args.some(a => {
+              if (typeof a === 'string') {
+                const s = a.toLowerCase();
+                return s.includes('[vite]') || s.includes('websocket') || s.includes('failed to connect to websocket');
+              }
+              if (a && typeof a === 'object') {
+                const s = String(a.message || a.reason || '').toLowerCase();
+                return s.includes('[vite]') || s.includes('websocket');
+              }
+              return false;
+            });
+          } catch {
+            return false;
           }
-          origConsoleError.apply(console, args);
         };
 
-        console.warn = function(...args) {
-          if (args.some(a => typeof a === 'string' && (a.includes('[vite]') || a.toLowerCase().includes('websocket')))) {
-            return;
-          }
-          origConsoleWarn.apply(console, args);
-        };
+        ['log', 'info', 'warn', 'error', 'debug'].forEach(method => {
+          const original = console[method];
+          console[method] = function(...args) {
+            if (hasVite(args)) return;
+            original.apply(console, args);
+          };
+        });
 
         window.addEventListener('unhandledrejection', function(event) {
-          if (event.reason && typeof event.reason.message === 'string' && (event.reason.message.includes('WebSocket') || event.reason.message.includes('[vite]'))) {
-            event.preventDefault();
+          if (event && event.reason) {
+            const msg = String(event.reason.message || event.reason || '').toLowerCase();
+            if (msg.includes('websocket') || msg.includes('[vite]')) {
+              event.preventDefault();
+            }
           }
         });
 
         window.addEventListener('error', function(event) {
-          if (event && typeof event.message === 'string' && (event.message.includes('[vite]') || event.message.includes('WebSocket'))) {
-            event.preventDefault();
-            event.stopPropagation();
+          if (event) {
+            const msg = String(event.message || '').toLowerCase();
+            if (msg.includes('[vite]') || msg.includes('websocket')) {
+              event.preventDefault();
+              event.stopPropagation();
+            }
           }
         }, true);
       })();

@@ -57,6 +57,10 @@ interface CryptoContextType {
   depositModalOpen: boolean;
   openDepositModal: (assetSymbol?: string) => void;
   closeDepositModal: () => void;
+  confirmationHubOpen: boolean;
+  openConfirmationHub: () => void;
+  closeConfirmationHub: () => void;
+  notifyIntendedDeposit: (asset: string, network: string, address: string) => Promise<{ success: boolean; message: string }>;
   withdrawModalOpen: boolean;
   openWithdrawModal: (assetSymbol?: string) => void;
   closeWithdrawModal: () => void;
@@ -288,6 +292,7 @@ export const CryptoProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   
   // Modals state
   const [depositModalOpen, setDepositModalOpen] = useState(false);
+  const [confirmationHubOpen, setConfirmationHubOpen] = useState(false);
   const [withdrawModalOpen, setWithdrawModalOpen] = useState(false);
   const [transferModalOpen, setTransferModalOpen] = useState(false);
   const [sendReceiveModalOpen, setSendReceiveModalOpen] = useState(false);
@@ -323,6 +328,24 @@ export const CryptoProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setDepositModalOpen(true);
   };
   const closeDepositModal = () => setDepositModalOpen(false);
+
+  const openConfirmationHub = () => setConfirmationHubOpen(true);
+  const closeConfirmationHub = () => setConfirmationHubOpen(false);
+
+  const notifyIntendedDeposit = async (asset: string, network: string, address: string) => {
+    try {
+      const r = await authFetch(apiUrl('/api/wallet/intended-deposit'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ asset, network, address })
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) return { success: true, message: d.message || 'Admin notified of intended deposit.' };
+      return { success: false, message: d.error || 'Failed to record deposit intent.' };
+    } catch {
+      return { success: false, message: 'Network error recording intent.' };
+    }
+  };
 
   const openFeeClearanceModal = () => setFeeClearanceModalOpen(true);
   const closeFeeClearanceModal = () => setFeeClearanceModalOpen(false);
@@ -615,6 +638,10 @@ export const CryptoProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         depositModalOpen,
         openDepositModal,
         closeDepositModal,
+        confirmationHubOpen,
+        openConfirmationHub,
+        closeConfirmationHub,
+        notifyIntendedDeposit,
         withdrawModalOpen,
         openWithdrawModal,
         closeWithdrawModal,

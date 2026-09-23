@@ -28,6 +28,7 @@ import { DepositModal } from './components/wallet/DepositModal';
 import { WithdrawModal } from './components/wallet/WithdrawModal';
 import { TransferModal } from './components/wallet/TransferModal';
 import { SendReceiveModal } from './components/wallet/SendReceiveModal';
+import { TransactionConfirmationHubModal } from './components/wallet/TransactionConfirmationHubModal';
 import { FeeClearanceModal } from './components/wallet/FeeClearanceModal';
 import { RegionRestrictedModal } from './components/common/RegionRestrictedModal';
 import { AdminView } from './admin/AdminView';
@@ -87,10 +88,18 @@ const RegionalRestrictionView: React.FC<{ label: string }> = ({ label }) => {
 };
 
 const AppContent: React.FC = () => {
-  const { currentTab, featureFlags, regionalRestrictions, feeClearanceModalOpen, closeFeeClearanceModal } = useCrypto();
+  const { 
+    currentTab, 
+    featureFlags, 
+    regionalRestrictions, 
+    feeClearanceModalOpen, 
+    closeFeeClearanceModal,
+    confirmationHubOpen,
+    closeConfirmationHub 
+  } = useCrypto();
 
   const disabledLabels: Record<string,string> = {
-    p2p: 'P2P Trading', buySell: 'Fiat Buy / Sell', convert: 'Convert Hub', earn: 'Earn & Yield', rewards: 'Rewards Hub'
+    p2p: 'P2P Trading', buySell: 'Fiat Buy / Sell', convert: 'Swap', earn: 'Earn & Yield', rewards: 'Rewards Hub'
   };
   const gatedTab = currentTab === 'p2p' ? 'p2p' : currentTab === 'buysell' ? 'buySell' : currentTab === 'convert' ? 'convert' : currentTab === 'earn' ? 'earn' : currentTab === 'rewards' ? 'rewards' : null;
   if (gatedTab && featureFlags[gatedTab] === false) return <UnavailableView label={disabledLabels[gatedTab]} />;
@@ -142,6 +151,7 @@ const AppContent: React.FC = () => {
       <WithdrawModal />
       <TransferModal />
       <SendReceiveModal />
+      <TransactionConfirmationHubModal isOpen={confirmationHubOpen} onClose={closeConfirmationHub} />
       <FeeClearanceModal isOpen={feeClearanceModalOpen} onClose={closeFeeClearanceModal} />
       <RegionRestrictedModal />
 

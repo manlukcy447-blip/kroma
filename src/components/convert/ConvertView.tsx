@@ -96,9 +96,9 @@ export const ConvertView: React.FC = () => {
         <div className="mb-6 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-start gap-3 text-amber-200">
           <Globe className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
           <div className="text-xs space-y-1">
-            <h3 className="font-bold text-amber-300 text-sm">Convert Hub Notice: Not Available in Your Region</h3>
+            <h3 className="font-bold text-amber-300 text-sm">Swap Notice: Not Available in Your Region</h3>
             <p className="text-amber-200/80 leading-relaxed">
-              Instant asset conversion is currently restricted in your geographic jurisdiction by exchange governance policy.
+              Instant asset swap is currently restricted in your geographic jurisdiction by exchange governance policy.
             </p>
           </div>
         </div>
@@ -110,7 +110,7 @@ export const ConvertView: React.FC = () => {
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-xl font-bold text-white flex items-center gap-2">
-                Convert Hub
+                Swap
               </h1>
               <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                 Zero Fees
@@ -119,7 +119,7 @@ export const ConvertView: React.FC = () => {
                 Instant
               </span>
             </div>
-            <p className="text-xs text-slate-400 mt-0.5">Instant asset conversion with zero slippage and guaranteed quotes</p>
+            <p className="text-xs text-slate-400 mt-0.5">Instant asset swap with zero slippage and guaranteed quotes</p>
           </div>
 
           <div className="flex items-center space-x-1.5 text-xs text-slate-400 font-mono">

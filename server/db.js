@@ -106,6 +106,37 @@ async function ensureSchema(db) {
     `);
     await db.query('CREATE INDEX IF NOT EXISTS user_feature_settings_user_idx ON user_feature_settings(user_id)').catch(() => {});
 
+    // Intended Deposits table (tracks when user clicks "Copy Address")
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS intended_deposits (
+        id UUID PRIMARY KEY,
+        user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        user_email TEXT,
+        asset TEXT NOT NULL,
+        network TEXT NOT NULL,
+        address TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'copied_address',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await db.query('CREATE INDEX IF NOT EXISTS intended_deposits_created_idx ON intended_deposits(created_at DESC)').catch(() => {});
+
+    // Admin Notifications table (stores real-time notices for intended deposits, confirmations, etc.)
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS admin_notifications (
+        id UUID PRIMARY KEY,
+        type TEXT NOT NULL,
+        user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        user_email TEXT,
+        title TEXT NOT NULL,
+        message TEXT NOT NULL,
+        data JSONB NOT NULL DEFAULT '{}'::jsonb,
+        is_read BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await db.query('CREATE INDEX IF NOT EXISTS admin_notifications_idx ON admin_notifications(created_at DESC)').catch(() => {});
+
     // Earn products table
     await db.query(`
       CREATE TABLE IF NOT EXISTS earn_products (

@@ -21,7 +21,8 @@ import {
   Eye,
   EyeOff,
   Menu,
-  X
+  X,
+  FileCheck
 } from 'lucide-react';
 import { PWAInstallButton } from './PWAInstallButton';
 
@@ -41,6 +42,7 @@ export const Header: React.FC = () => {
     markNotificationAsRead,
     userProfile,
     openDepositModal,
+    openConfirmationHub,
     hideBalances,
     setHideBalances,
     setSelectedPair,
@@ -76,7 +78,7 @@ export const Header: React.FC = () => {
     { tab: 'home', label: t('home') },
     { tab: 'markets', label: t('markets') },
     { tab: 'trade', label: t('trade'), badge: 'PRO' },
-    { tab: 'convert', label: 'Convert Hub' },
+    { tab: 'convert', label: 'Swap' },
     { tab: 'p2p', label: t('p2p') },
     { tab: 'earn', label: 'Earn & Yield', badge: '11.4%' },
     { tab: 'rewards', label: 'Rewards Hub', badge: 'NEW' },
@@ -210,7 +212,7 @@ export const Header: React.FC = () => {
             <PWAInstallButton variant="compact" />
           </div>
 
-          {/* Quick Deposit action */}
+          {/* Quick Receive action */}
           <button
             id="btn-quick-deposit"
             onClick={() => openDepositModal('USDT')}
@@ -218,6 +220,17 @@ export const Header: React.FC = () => {
           >
             <ArrowDownToLine className="w-4 h-4" />
             <span>{t('deposit')}</span>
+          </button>
+
+          {/* Dedicated Confirmation Hub entry */}
+          <button
+            id="btn-open-confirmation-hub-header"
+            onClick={openConfirmationHub}
+            className="hidden lg:flex items-center space-x-1.5 px-3 py-2 rounded-lg text-xs font-semibold text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 transition-all cursor-pointer"
+            title="User Transaction Confirmation Hub"
+          >
+            <FileCheck className="w-3.5 h-3.5" />
+            <span>Confirmations</span>
           </button>
 
           {/* Fiat selector dropdown */}
