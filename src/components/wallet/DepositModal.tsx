@@ -10,8 +10,7 @@ import {
   Clock, 
   QrCode,
   Info,
-  CheckCircle2,
-  Bell
+  CheckCircle2
 } from 'lucide-react';
 import { apiUrl } from '../../admin/api';
 import { LiveQRCode } from '../common/LiveQRCode';
@@ -28,7 +27,6 @@ export const DepositModal: React.FC = () => {
   const [selectedSymbol, setSelectedSymbol] = useState(activeModalAsset || 'USDT');
   const [selectedNetworkId, setSelectedNetworkId] = useState('');
   const [copied, setCopied] = useState(false);
-  const [adminNotified, setAdminNotified] = useState(false);
   const [serverAddress, setServerAddress] = useState<any>(null);
   const [addressLoading, setAddressLoading] = useState(false);
 
@@ -88,7 +86,6 @@ export const DepositModal: React.FC = () => {
     if (!displayAddress) return;
     navigator.clipboard.writeText(displayAddress);
     setCopied(true);
-    setAdminNotified(true);
     setTimeout(() => setCopied(false), 2500);
 
     // Notify backend & administration desk of intended deposit with timestamp
@@ -164,7 +161,6 @@ export const DepositModal: React.FC = () => {
                       if (assetMatch?.networks?.length) {
                         setSelectedNetworkId(assetMatch.networks[0].id);
                       }
-                      setAdminNotified(false);
                     }}
                     className={`px-3 py-2.5 rounded-xl text-xs font-bold transition-all flex flex-col items-center justify-center gap-1 border cursor-pointer ${
                       isSelected
@@ -191,7 +187,6 @@ export const DepositModal: React.FC = () => {
                     type="button"
                     onClick={() => {
                       setSelectedNetworkId(net.id);
-                      setAdminNotified(false);
                     }}
                     className={`p-3 rounded-xl border text-left text-xs transition-all cursor-pointer flex items-center justify-between ${
                       isSelected
@@ -294,16 +289,6 @@ export const DepositModal: React.FC = () => {
                 )}
               </div>
             </div>
-
-            {/* Live Intended Deposit Notice Status */}
-            {adminNotified && (
-              <div className="p-3 rounded-xl bg-emerald-950/40 border border-emerald-500/40 text-xs text-emerald-300 flex items-center gap-2 animate-in fade-in">
-                <Bell className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>
-                  <strong>Admin Notified:</strong> Your intended deposit for {currentAsset.symbol} on {displayNetwork} and timestamp have been automatically recorded with compliance administration.
-                </span>
-              </div>
-            )}
 
             {/* Crucial Network Safety Advisory */}
             <div className="p-3 rounded-xl bg-amber-950/30 border border-amber-600/30 text-[11px] text-amber-200/90 flex items-start gap-2.5">
