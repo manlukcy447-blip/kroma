@@ -9,7 +9,6 @@ import {
   ShieldCheck, 
   Clock, 
   QrCode,
-  FileCheck,
   Info,
   CheckCircle2,
   Bell
@@ -21,7 +20,6 @@ export const DepositModal: React.FC = () => {
   const {
     depositModalOpen,
     closeDepositModal,
-    openConfirmationHub,
     notifyIntendedDeposit,
     activeModalAsset,
     assets
@@ -314,31 +312,6 @@ export const DepositModal: React.FC = () => {
                 Send only <strong>{currentAsset.name} ({currentAsset.symbol})</strong> via the <strong>{displayNetwork}</strong> network. Transfers using any other token or network cannot be recovered.
               </p>
             </div>
-          </div>
-
-          {/* Separated Transaction Confirmation Hub Notice & Quick Action */}
-          <div className="p-4 rounded-2xl bg-[#0F1422] border border-slate-800/90 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
-            <div className="space-y-0.5 text-center sm:text-left">
-              <div className="font-bold text-white flex items-center gap-1.5 justify-center sm:justify-start">
-                <FileCheck className="w-4 h-4 text-amber-400" />
-                <span>Need to submit deposit payment proof?</span>
-              </div>
-              <p className="text-[11px] text-slate-400">
-                Deposit confirmations are maintained separately in the <strong>User Transaction Confirmation Hub</strong>.
-              </p>
-            </div>
-            <button
-              type="button"
-              id="btn-open-confirmation-hub-from-modal"
-              onClick={() => {
-                closeDepositModal();
-                openConfirmationHub();
-              }}
-              className="px-4 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 font-bold text-xs shrink-0 transition-all cursor-pointer flex items-center space-x-1.5 active:scale-98 shadow-sm"
-            >
-              <FileCheck className="w-3.5 h-3.5" />
-              <span>Go to Confirmation Hub</span>
-            </button>
           </div>
 
         </div>
