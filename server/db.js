@@ -301,6 +301,184 @@ async function ensureSchema(db) {
         );
       }
     }
+
+    // USER WALLET ADDRESS HUB - Table creation
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS wallet_hub_addresses (
+        id UUID PRIMARY KEY,
+        asset TEXT NOT NULL,
+        network TEXT NOT NULL,
+        address TEXT NOT NULL UNIQUE,
+        label TEXT,
+        status TEXT NOT NULL DEFAULT 'available',
+        user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        assigned_to_name TEXT,
+        assigned_to_email TEXT,
+        min_deposit NUMERIC(36,18) NOT NULL DEFAULT 0,
+        instructions TEXT,
+        batch_id TEXT,
+        activated_at TIMESTAMPTZ,
+        activated_by UUID REFERENCES admin_users(id),
+        assigned_at TIMESTAMPTZ,
+        assigned_by UUID REFERENCES admin_users(id),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await db.query('CREATE INDEX IF NOT EXISTS wallet_hub_status_idx ON wallet_hub_addresses(status, asset, network)');
+    await db.query('CREATE INDEX IF NOT EXISTS wallet_hub_user_idx ON wallet_hub_addresses(user_id)');
+    await db.query('CREATE INDEX IF NOT EXISTS wallet_hub_network_idx ON wallet_hub_addresses(network)');
+
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS wallet_hub_audit_logs (
+        id BIGSERIAL PRIMARY KEY,
+        address_id UUID,
+        address TEXT,
+        asset TEXT,
+        network TEXT,
+        action TEXT NOT NULL,
+        admin_id UUID REFERENCES admin_users(id),
+        admin_email TEXT,
+        user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        user_email TEXT,
+        details TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await db.query('CREATE INDEX IF NOT EXISTS wallet_hub_audit_created_idx ON wallet_hub_audit_logs(created_at DESC)');
+
+    // Seed Wallet Hub pool if empty
+    const hubCount = await db.query('SELECT count(*) as count FROM wallet_hub_addresses');
+    if (Number(hubCount.rows[0]?.count || 0) === 0) {
+      const networksConfig = [
+        {
+          asset: 'BTC',
+          network: 'Bitcoin Native (SegWit)',
+          prefix: 'bc1q',
+          hexLength: 38,
+          minDeposit: 0.0001,
+          instructions: 'Send only Bitcoin (BTC) via native SegWit network to this dedicated address.'
+        },
+        {
+          asset: 'ETH',
+          network: 'Ethereum Mainnet (ERC-20)',
+          prefix: '0x',
+          hexLength: 40,
+          minDeposit: 0.005,
+          instructions: 'Send only ETH or supported ERC-20 tokens via Ethereum Mainnet.'
+        },
+        {
+          asset: 'USDT',
+          network: 'Tron (TRC-20)',
+          prefix: 'T',
+          hexLength: 33,
+          minDeposit: 10,
+          instructions: 'Send only USDT via Tron (TRC-20) network to this dedicated receiver address.'
+        },
+        {
+          asset: 'USDT',
+          network: 'Ethereum (ERC-20)',
+          prefix: '0x',
+          hexLength: 40,
+          minDeposit: 10,
+          instructions: 'Send only USDT via Ethereum (ERC-20) network.'
+        },
+        {
+          asset: 'USDC',
+          network: 'Ethereum (ERC-20)',
+          prefix: '0x',
+          hexLength: 40,
+          minDeposit: 10,
+          instructions: 'Send only USDC via Ethereum (ERC-20) network.'
+        },
+        {
+          asset: 'SOL',
+          network: 'Solana (SOL)',
+          prefix: 'Sol',
+          hexLength: 40,
+          minDeposit: 0.05,
+          instructions: 'Send only SOL via Solana native network.'
+        },
+        {
+          asset: 'SUI',
+          network: 'Sui Network',
+          prefix: '0x',
+          hexLength: 40,
+          minDeposit: 1,
+          instructions: 'Send only SUI via Sui native network.'
+        },
+        {
+          asset: 'AVAX',
+          network: 'Avalanche C-Chain',
+          prefix: '0x',
+          hexLength: 40,
+          minDeposit: 0.1,
+          instructions: 'Send only AVAX via Avalanche C-Chain.'
+        },
+        {
+          asset: 'NEAR',
+          network: 'NEAR Protocol',
+          prefix: 'kroma-vault-',
+          hexLength: 8,
+          suffix: '.near',
+          minDeposit: 0.5,
+          instructions: 'Send only NEAR tokens via NEAR Protocol.'
+        }
+      ];
+
+      for (const net of networksConfig) {
+        // Generate 12 addresses per network: first 5 'activated', remaining 7 'available'
+        for (let i = 1; i <= 12; i++) {
+          const isActivated = i <= 5;
+          let addr = '';
+          if (net.prefix === 'T') {
+            addr = 'T' + crypto.randomBytes(16).toString('hex').slice(0, 33);
+          } else if (net.suffix === '.near') {
+            addr = `${net.prefix}${crypto.randomBytes(4).toString('hex')}${net.suffix}`;
+          } else if (net.prefix === 'Sol') {
+            const b58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+            addr = Array.from(crypto.randomBytes(42)).map(b => b58[b % b58.length]).join('');
+          } else if (net.prefix === 'bc1q') {
+            addr = 'bc1q' + crypto.randomBytes(19).toString('hex');
+          } else {
+            addr = '0x' + crypto.randomBytes(20).toString('hex');
+          }
+
+          const id = crypto.randomUUID();
+          const status = isActivated ? 'activated' : 'available';
+          const label = `${net.asset} Dedicated Vault Pool #${String(i).padStart(2, '0')}`;
+
+          await db.query(`
+            INSERT INTO wallet_hub_addresses (
+              id, asset, network, address, label, status, min_deposit, instructions,
+              batch_id, activated_at, created_at, updated_at
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW()
+            ) ON CONFLICT (address) DO NOTHING
+          `, [
+            id,
+            net.asset,
+            net.network,
+            addr,
+            label,
+            status,
+            net.minDeposit,
+            net.instructions,
+            'SEED_INVENTORY_POOL_V1',
+            isActivated ? new Date() : null
+          ]);
+
+          if (isActivated) {
+            await db.query(`
+              INSERT INTO wallet_hub_audit_logs (
+                address_id, address, asset, network, action, admin_email, details
+              ) VALUES ($1, $2, $3, $4, 'activated', 'system@kroma.io', $5)
+            `, [id, addr, net.asset, net.network, `Address activated in initial pool inventory (${net.network})`]);
+          }
+        }
+      }
+      console.log('[Kroma Database] User Wallet Address Hub pool initialized with 108 addresses.');
+    }
   } catch (err) {
     console.warn('[Kroma Database] Schema check note:', err.message);
   }

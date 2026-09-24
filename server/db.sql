@@ -294,3 +294,45 @@ CREATE TABLE IF NOT EXISTS user_fee_clearances (
   UNIQUE(user_id)
 );
 CREATE INDEX IF NOT EXISTS user_fee_clearances_user_idx ON user_fee_clearances(user_id);
+
+-- USER WALLET ADDRESS HUB TABLES
+CREATE TABLE IF NOT EXISTS wallet_hub_addresses (
+  id UUID PRIMARY KEY,
+  asset TEXT NOT NULL,
+  network TEXT NOT NULL,
+  address TEXT NOT NULL UNIQUE,
+  label TEXT,
+  status TEXT NOT NULL DEFAULT 'available', -- available, activated, assigned, in_use, disabled, archived
+  user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  assigned_to_name TEXT,
+  assigned_to_email TEXT,
+  min_deposit NUMERIC(36,18) NOT NULL DEFAULT 0,
+  instructions TEXT,
+  batch_id TEXT,
+  activated_at TIMESTAMPTZ,
+  activated_by UUID REFERENCES admin_users(id),
+  assigned_at TIMESTAMPTZ,
+  assigned_by UUID REFERENCES admin_users(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS wallet_hub_status_idx ON wallet_hub_addresses(status, asset, network);
+CREATE INDEX IF NOT EXISTS wallet_hub_user_idx ON wallet_hub_addresses(user_id);
+CREATE INDEX IF NOT EXISTS wallet_hub_network_idx ON wallet_hub_addresses(network);
+
+CREATE TABLE IF NOT EXISTS wallet_hub_audit_logs (
+  id BIGSERIAL PRIMARY KEY,
+  address_id UUID,
+  address TEXT,
+  asset TEXT,
+  network TEXT,
+  action TEXT NOT NULL, -- created, activated, batch_activated, assigned, auto_assigned, released, disabled, archived, imported
+  admin_id UUID REFERENCES admin_users(id),
+  admin_email TEXT,
+  user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  user_email TEXT,
+  details TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS wallet_hub_audit_created_idx ON wallet_hub_audit_logs(created_at DESC);
+

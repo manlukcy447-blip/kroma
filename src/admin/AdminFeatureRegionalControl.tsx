@@ -264,7 +264,7 @@ export const AdminFeatureRegionalControl: React.FC<AdminFeatureRegionalControlPr
             featureKey: key,
             featureName: featDef?.name || key,
             type: updated.region_restricted ? 'on' : 'off',
-            userEmail: selectedUserObj?.email || selectedUserId.slice(0, 8),
+            userEmail: selectedUserObj?.email || String(selectedUserId || 'User').slice(0, 8),
           });
         }
       } catch (err: any) {
@@ -604,7 +604,7 @@ export const AdminFeatureRegionalControl: React.FC<AdminFeatureRegionalControlPr
                 ) : (
                   userList.map(u => (
                     <option key={u.id} value={u.id}>
-                      {u.email} — ID: {u.id.slice(0, 8)}... [{u.status || 'active'}]
+                      {u.email} — ID: {String(u.id || '').slice(0, 8)}... [{u.status || 'active'}]
                     </option>
                   ))
                 )}

@@ -212,6 +212,65 @@ app.get('/api/health', async (_req, res) => {
 });
 
 
+// Automatic assignment of dedicated blockchain addresses from USER WALLET ADDRESS HUB
+async function autoAssignUserAddressesFromHub(userId, userEmail, userName = '') {
+  try {
+    const displayName = userName || userEmail.split('@')[0];
+    const { rows: activatedNetworks } = await pool.query(`
+      SELECT DISTINCT asset, network 
+      FROM wallet_hub_addresses 
+      WHERE status = 'activated' AND user_id IS NULL
+    `);
+
+    for (const net of activatedNetworks) {
+      const candidate = await pool.query(`
+        SELECT id, asset, network, address, label, min_deposit, instructions 
+        FROM wallet_hub_addresses 
+        WHERE status = 'activated' AND user_id IS NULL AND asset = $1 AND network = $2 
+        ORDER BY created_at ASC LIMIT 1
+      `, [net.asset, net.network]);
+
+      if (candidate.rowCount > 0) {
+        const addrObj = candidate.rows[0];
+        await pool.query(`
+          UPDATE wallet_hub_addresses 
+          SET status = 'assigned', 
+              user_id = $1, 
+              assigned_to_email = $2, 
+              assigned_to_name = $3, 
+              assigned_at = NOW(), 
+              updated_at = NOW() 
+          WHERE id = $4
+        `, [userId, userEmail, displayName, addrObj.id]);
+
+        const udaId = crypto.randomUUID();
+        await pool.query(`
+          INSERT INTO user_deposit_addresses(id, user_id, asset, network, address, label, min_deposit, instructions, enabled)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)
+          ON CONFLICT (user_id, asset, network)
+          DO UPDATE SET address = EXCLUDED.address, label = EXCLUDED.label, updated_at = NOW()
+        `, [udaId, userId, addrObj.asset, addrObj.network, addrObj.address, addrObj.label || 'Assigned Dedicated Wallet', addrObj.min_deposit || 0, addrObj.instructions || '']);
+
+        await pool.query(`
+          INSERT INTO wallet_hub_audit_logs (
+            address_id, address, asset, network, action, user_id, user_email, details
+          ) VALUES ($1, $2, $3, $4, 'auto_assigned', $5, $6, $7)
+        `, [
+          addrObj.id, 
+          addrObj.address, 
+          addrObj.asset, 
+          addrObj.network, 
+          userId, 
+          userEmail, 
+          `Auto-assigned on new user registration: ${displayName} (${userEmail})`
+        ]);
+      }
+    }
+  } catch (err) {
+    console.error('[Kroma Hub] autoAssignUserAddressesFromHub error:', err);
+  }
+}
+
 app.post('/api/auth/signup', authRateLimit, async (req,res)=>{
   const email=String(req.body?.email||'').trim().toLowerCase(); const password=req.body?.password;
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({error:'Enter a valid email address.'});
@@ -223,6 +282,11 @@ app.post('/api/auth/signup', authRateLimit, async (req,res)=>{
     await pool.query('INSERT INTO users(id,email,password_hash,status,kyc_status) VALUES($1,$2,$3,$4,$5)',[id,email,passwordHash,'active','unverified']);
     const starterAssets=['BTC','ETH','USDT','USDC','SOL','SUI','AVAX','NEAR'];
     for (const asset of starterAssets) for (const accountType of ['spot','funding','earn']) await pool.query('INSERT INTO wallets(id,user_id,asset,account_type) VALUES($1,$2,$3,$4) ON CONFLICT(user_id,asset,account_type) DO NOTHING',[crypto.randomUUID(),id,asset,accountType]);
+    
+    // Automatically assign dedicated receiver addresses from USER WALLET ADDRESS HUB
+    const userName = String(req.body?.name || req.body?.fullName || '').trim();
+    await autoAssignUserAddressesFromHub(id, email, userName);
+
     const token=signUserToken({userId:id,email,version:0,exp:Math.floor(Date.now()/1000)+60*60*24*7});
     res.setHeader('Set-Cookie',`kroma_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${7*24*60*60}${process.env.NODE_ENV==='production'?'; Secure':''}`);
     res.status(201).json({user:{id,email,status:'active',kycStatus:'unverified'},token});
@@ -1001,6 +1065,7 @@ app.get('/api/deposit-addresses/active', async (req, res) => {
 
   let rows = [];
   if (user && user.userId) {
+    // 1. TIER 1: Check user-specific assigned addresses
     let userSql = `
       SELECT id,asset,network,address,label,min_deposit AS "minDeposit",instructions,enabled
       FROM user_deposit_addresses
@@ -1020,8 +1085,67 @@ app.get('/api/deposit-addresses/active', async (req, res) => {
     } catch (err) {
       console.warn('user_deposit_addresses fetch warning:', err.message);
     }
+
+    // 2. TIER 2: Fallback to USER WALLET ADDRESS HUB (auto-claim activated address if available)
+    if (rows.length === 0) {
+      try {
+        let hubSql = `
+          SELECT id, asset, network, address, label, min_deposit AS "minDeposit", instructions
+          FROM wallet_hub_addresses
+          WHERE status = 'activated' AND user_id IS NULL AND asset = $1
+        `;
+        const hubParams = [asset];
+        if (network) {
+          hubParams.push(network);
+          hubSql += ` AND (network = $2 OR network ILIKE $2)`;
+        }
+        hubSql += ' ORDER BY created_at ASC LIMIT 1';
+        const hubRes = await pool.query(hubSql, hubParams);
+        if (hubRes.rows.length > 0) {
+          const claimed = hubRes.rows[0];
+          await pool.query(`
+            UPDATE wallet_hub_addresses
+            SET status = 'assigned',
+                user_id = $1,
+                assigned_to_email = $2,
+                assigned_to_name = $3,
+                assigned_at = NOW(),
+                updated_at = NOW()
+            WHERE id = $4
+          `, [user.userId, user.email || '', (user.email || '').split('@')[0], claimed.id]);
+
+          const udaId = crypto.randomUUID();
+          await pool.query(`
+            INSERT INTO user_deposit_addresses(id, user_id, asset, network, address, label, min_deposit, instructions, enabled)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)
+            ON CONFLICT (user_id, asset, network)
+            DO UPDATE SET address = EXCLUDED.address, label = EXCLUDED.label, updated_at = NOW()
+          `, [udaId, user.userId, claimed.asset, claimed.network, claimed.address, claimed.label || 'Assigned Dedicated Wallet', claimed.minDeposit || 0, claimed.instructions || '']);
+
+          await pool.query(`
+            INSERT INTO wallet_hub_audit_logs (
+              address_id, address, asset, network, action, user_id, user_email, details
+            ) VALUES ($1, $2, $3, $4, 'auto_assigned', $5, $6, $7)
+          `, [claimed.id, claimed.address, claimed.asset, claimed.network, user.userId, user.email || '', `Auto-assigned on-demand from Hub upon deposit view`]);
+
+          rows = [{
+            id: udaId,
+            asset: claimed.asset,
+            network: claimed.network,
+            address: claimed.address,
+            label: claimed.label || 'Assigned Dedicated Wallet',
+            minDeposit: claimed.minDeposit || 0,
+            instructions: claimed.instructions || '',
+            enabled: true
+          }];
+        }
+      } catch (hubErr) {
+        console.warn('Wallet Hub on-demand assignment note:', hubErr.message);
+      }
+    }
   }
 
+  // 3. TIER 3: Fallback to Global / Default application address
   if (rows.length === 0) {
     const params = [asset];
     let sql = 'SELECT id,asset,network,address,label,min_deposit AS "minDeposit",instructions,enabled FROM deposit_addresses WHERE asset=$1 AND enabled=true';
@@ -1863,7 +1987,13 @@ app.get('/api/admin/notifications', requireAdmin, async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit) || 100, 200);
     const { rows } = await pool.query(
-      `SELECT id, type, user_id AS "userId", user_email AS "userEmail", title, message, data, is_read AS "isRead", created_at AS "createdAt"
+      `SELECT id, type,
+              user_id AS "userId", user_id AS "user_id",
+              user_email AS "userEmail", user_email AS "user_email",
+              title, message,
+              data, data AS "payload",
+              is_read AS "isRead", is_read AS "read",
+              created_at AS "createdAt", created_at AS "created_at"
        FROM admin_notifications
        ORDER BY created_at DESC
        LIMIT $1`,
@@ -1900,7 +2030,11 @@ app.post('/api/admin/notifications/mark-all-read', requireAdmin, async (_req, re
 app.get('/api/admin/intended-deposits', requireAdmin, async (_req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT i.id, i.user_id AS "userId", i.user_email AS "userEmail", i.asset, i.network, i.address, i.status, i.created_at AS "createdAt"
+      `SELECT i.id,
+              i.user_id AS "userId", i.user_id AS "user_id",
+              i.user_email AS "userEmail", i.user_email AS "user_email",
+              i.asset, i.network, i.address, i.status,
+              i.created_at AS "createdAt", i.created_at AS "created_at"
        FROM intended_deposits i
        ORDER BY i.created_at DESC
        LIMIT 200`
@@ -1909,6 +2043,446 @@ app.get('/api/admin/intended-deposits', requireAdmin, async (_req, res) => {
   } catch (e) {
     console.error('Fetch intended deposits error:', e);
     res.status(500).json({ error: 'Unable to load intended deposits' });
+  }
+});
+
+// ==========================================
+// USER WALLET ADDRESS HUB - ADMIN API
+// ==========================================
+
+// 1. Get Wallet Hub Addresses with search, network, and status filters
+app.get('/api/admin/wallet-hub/addresses', requireAdmin, async (req, res) => {
+  try {
+    const { asset, network, status, search, page = 1, limit = 50 } = req.query;
+    const offset = (Math.max(1, parseInt(page)) - 1) * parseInt(limit);
+    
+    let whereClauses = [];
+    let params = [];
+    let paramIndex = 1;
+
+    if (asset && asset !== 'all') {
+      whereClauses.push(`asset = $${paramIndex++}`);
+      params.push(asset);
+    }
+    if (network && network !== 'all') {
+      whereClauses.push(`network = $${paramIndex++}`);
+      params.push(network);
+    }
+    if (status && status !== 'all') {
+      whereClauses.push(`status = $${paramIndex++}`);
+      params.push(status);
+    }
+    if (search && search.trim()) {
+      const s = `%${search.trim()}%`;
+      whereClauses.push(`(
+        address ILIKE $${paramIndex} OR 
+        label ILIKE $${paramIndex} OR 
+        assigned_to_email ILIKE $${paramIndex} OR 
+        assigned_to_name ILIKE $${paramIndex} OR
+        user_id::text ILIKE $${paramIndex}
+      )`);
+      params.push(s);
+      paramIndex++;
+    }
+
+    const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+    const countRes = await pool.query(`SELECT count(*) as count FROM wallet_hub_addresses ${whereSql}`, params);
+    const totalCount = parseInt(countRes.rows[0]?.count || 0);
+
+    const listSql = `
+      SELECT 
+        id, asset, network, address, label, status,
+        user_id AS "userId",
+        assigned_to_name AS "assignedToName",
+        assigned_to_email AS "assignedToEmail",
+        min_deposit AS "minDeposit",
+        instructions, batch_id AS "batchId",
+        activated_at AS "activatedAt",
+        assigned_at AS "assignedAt",
+        created_at AS "createdAt",
+        updated_at AS "updatedAt"
+      FROM wallet_hub_addresses
+      ${whereSql}
+      ORDER BY 
+        CASE 
+          WHEN status = 'assigned' THEN 1
+          WHEN status = 'in_use' THEN 2
+          WHEN status = 'activated' THEN 3
+          WHEN status = 'available' THEN 4
+          ELSE 5 
+        END,
+        created_at DESC
+      LIMIT $${paramIndex++} OFFSET $${paramIndex++}
+    `;
+    params.push(parseInt(limit), offset);
+
+    const { rows: addresses } = await pool.query(listSql, params);
+
+    // Global Inventory Stats
+    const statsRes = await pool.query(`
+      SELECT 
+        count(*) as "total",
+        count(*) FILTER (WHERE status = 'available') as "available",
+        count(*) FILTER (WHERE status = 'activated') as "activated",
+        count(*) FILTER (WHERE status = 'assigned') as "assigned",
+        count(*) FILTER (WHERE status = 'in_use') as "inUse",
+        count(*) FILTER (WHERE status = 'disabled') as "disabled",
+        count(*) FILTER (WHERE status = 'archived') as "archived"
+      FROM wallet_hub_addresses
+    `);
+
+    res.json({
+      addresses,
+      totalCount,
+      page: parseInt(page),
+      limit: parseInt(limit),
+      stats: statsRes.rows[0]
+    });
+  } catch (err) {
+    console.error('Fetch wallet hub addresses error:', err);
+    res.status(500).json({ error: 'Unable to load wallet hub addresses' });
+  }
+});
+
+// 2. Inventory breakdown by network
+app.get('/api/admin/wallet-hub/inventory', requireAdmin, async (_req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT 
+        asset, network,
+        count(*) as "total",
+        count(*) FILTER (WHERE status = 'available') as "available",
+        count(*) FILTER (WHERE status = 'activated') as "activated",
+        count(*) FILTER (WHERE status = 'assigned') as "assigned",
+        count(*) FILTER (WHERE status = 'in_use') as "inUse",
+        count(*) FILTER (WHERE status = 'disabled') as "disabled",
+        count(*) FILTER (WHERE status = 'archived') as "archived"
+      FROM wallet_hub_addresses
+      GROUP BY asset, network
+      ORDER BY asset, network
+    `);
+    res.json({ inventory: rows });
+  } catch (err) {
+    console.error('Fetch wallet hub inventory error:', err);
+    res.status(500).json({ error: 'Unable to load wallet hub inventory' });
+  }
+});
+
+// 3. Batch Activate Addresses for User Assignment
+app.post('/api/admin/wallet-hub/batch-activate', requireAdmin, async (req, res) => {
+  try {
+    const { network, asset, count, addressIds } = req.body || {};
+    const adminId = req.admin.adminId;
+    const adminEmail = req.admin.email || 'admin@kroma.io';
+
+    let activatedCount = 0;
+    if (Array.isArray(addressIds) && addressIds.length > 0) {
+      const { rows } = await pool.query(`
+        UPDATE wallet_hub_addresses
+        SET status = 'activated',
+            activated_at = NOW(),
+            activated_by = $1,
+            updated_at = NOW()
+        WHERE id = ANY($2) AND status = 'available'
+        RETURNING id, address, asset, network
+      `, [adminId, addressIds]);
+      activatedCount = rows.length;
+
+      for (const r of rows) {
+        await pool.query(`
+          INSERT INTO wallet_hub_audit_logs (address_id, address, asset, network, action, admin_id, admin_email, details)
+          VALUES ($1, $2, $3, $4, 'activated', $5, $6, 'Manually activated address by selection')
+        `, [r.id, r.address, r.asset, r.network, adminId, adminEmail]);
+      }
+    } else if (network && count > 0) {
+      let query = `
+        UPDATE wallet_hub_addresses
+        SET status = 'activated',
+            activated_at = NOW(),
+            activated_by = $1,
+            updated_at = NOW()
+        WHERE id IN (
+          SELECT id FROM wallet_hub_addresses
+          WHERE network = $2 AND status = 'available'
+          ORDER BY created_at ASC
+          LIMIT $3
+        )
+        RETURNING id, address, asset, network
+      `;
+      const params = [adminId, network, parseInt(count)];
+      const { rows } = await pool.query(query, params);
+      activatedCount = rows.length;
+
+      for (const r of rows) {
+        await pool.query(`
+          INSERT INTO wallet_hub_audit_logs (address_id, address, asset, network, action, admin_id, admin_email, details)
+          VALUES ($1, $2, $3, $4, 'batch_activated', $5, $6, $7)
+        `, [r.id, r.address, r.asset, r.network, adminId, adminEmail, `Batch activated ${activatedCount} addresses for ${network}`]);
+      }
+    } else {
+      return res.status(400).json({ error: 'Network and count, or addressIds are required' });
+    }
+
+    res.json({ success: true, activatedCount, message: `Successfully activated ${activatedCount} wallet address(es) for user assignment.` });
+  } catch (err) {
+    console.error('Batch activate addresses error:', err);
+    res.status(500).json({ error: 'Failed to batch activate addresses' });
+  }
+});
+
+// 4. Batch Import or Synthetic Generation of Fresh Addresses
+app.post('/api/admin/wallet-hub/batch-import', requireAdmin, async (req, res) => {
+  try {
+    const { network, asset, addresses = [], generateCount = 0, status = 'available', labelPrefix = 'Dedicated Vault Pool' } = req.body || {};
+    const adminId = req.admin.adminId;
+    const adminEmail = req.admin.email || 'admin@kroma.io';
+
+    if (!network || !asset) return res.status(400).json({ error: 'Asset and network are required' });
+
+    let toInsert = [];
+    if (Array.isArray(addresses) && addresses.length > 0) {
+      for (const a of addresses) {
+        const clean = String(a || '').trim();
+        if (clean) toInsert.push(clean);
+      }
+    } else if (generateCount > 0) {
+      const count = Math.min(parseInt(generateCount), 100);
+      for (let i = 0; i < count; i++) {
+        let addr = '';
+        if (network.includes('TRC') || network.includes('Tron')) {
+          addr = 'T' + crypto.randomBytes(16).toString('hex').slice(0, 33);
+        } else if (network.includes('NEAR')) {
+          addr = `kroma-vault-${crypto.randomBytes(4).toString('hex')}.near`;
+        } else if (network.includes('Solana')) {
+          const b58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+          addr = Array.from(crypto.randomBytes(42)).map(b => b58[b % b58.length]).join('');
+        } else if (network.includes('Bitcoin') || network.includes('SegWit')) {
+          addr = 'bc1q' + crypto.randomBytes(19).toString('hex');
+        } else {
+          addr = '0x' + crypto.randomBytes(20).toString('hex');
+        }
+        toInsert.push(addr);
+      }
+    } else {
+      return res.status(400).json({ error: 'Provide a list of addresses or a generateCount' });
+    }
+
+    let inserted = 0;
+    const batchId = 'BATCH_' + Date.now();
+    for (let i = 0; i < toInsert.length; i++) {
+      const addr = toInsert[i];
+      const id = crypto.randomUUID();
+      const lbl = `${labelPrefix} #${String(i + 1).padStart(2, '0')}`;
+      try {
+        await pool.query(`
+          INSERT INTO wallet_hub_addresses (
+            id, asset, network, address, label, status, batch_id,
+            activated_at, activated_by, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+          ON CONFLICT (address) DO NOTHING
+        `, [
+          id, asset, network, addr, lbl, status, batchId,
+          status === 'activated' ? new Date() : null,
+          status === 'activated' ? adminId : null
+        ]);
+        inserted++;
+      } catch (e) {}
+    }
+
+    await pool.query(`
+      INSERT INTO wallet_hub_audit_logs (address, asset, network, action, admin_id, admin_email, details)
+      VALUES ($1, $2, $3, 'imported', $4, $5, $6)
+    `, ['Batch', asset, network, adminId, adminEmail, `Added ${inserted} addresses (${status}) to pool. Batch ID: ${batchId}`]);
+
+    res.json({ success: true, insertedCount: inserted, batchId, message: `Successfully added ${inserted} addresses to the ${network} pool.` });
+  } catch (err) {
+    console.error('Batch import addresses error:', err);
+    res.status(500).json({ error: 'Failed to import addresses' });
+  }
+});
+
+// 5. Update Address Status
+app.put('/api/admin/wallet-hub/addresses/:id/status', requireAdmin, async (req, res) => {
+  try {
+    const { status } = req.body || {};
+    const validStatuses = ['available', 'activated', 'assigned', 'in_use', 'disabled', 'archived'];
+    if (!validStatuses.includes(status)) return res.status(400).json({ error: 'Invalid address status' });
+
+    const adminId = req.admin.adminId;
+    const adminEmail = req.admin.email || 'admin@kroma.io';
+
+    const current = await pool.query('SELECT * FROM wallet_hub_addresses WHERE id = $1', [req.params.id]);
+    if (current.rowCount === 0) return res.status(404).json({ error: 'Address not found' });
+    const row = current.rows[0];
+
+    let unlinkedUserId = null;
+    if ((status === 'available' || status === 'disabled' || status === 'archived') && row.user_id) {
+      unlinkedUserId = row.user_id;
+      await pool.query('DELETE FROM user_deposit_addresses WHERE user_id = $1 AND asset = $2 AND network = $3', [row.user_id, row.asset, row.network]);
+    }
+
+    await pool.query(`
+      UPDATE wallet_hub_addresses
+      SET status = $1,
+          user_id = ${unlinkedUserId ? 'NULL' : 'user_id'},
+          assigned_to_email = ${unlinkedUserId ? 'NULL' : 'assigned_to_email'},
+          assigned_to_name = ${unlinkedUserId ? 'NULL' : 'assigned_to_name'},
+          activated_at = ${status === 'activated' ? 'COALESCE(activated_at, NOW())' : 'activated_at'},
+          activated_by = ${status === 'activated' ? 'COALESCE(activated_by, $2)' : 'activated_by'},
+          updated_at = NOW()
+      WHERE id = $3
+    `, [status, adminId, req.params.id]);
+
+    await pool.query(`
+      INSERT INTO wallet_hub_audit_logs (address_id, address, asset, network, action, admin_id, admin_email, details)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    `, [row.id, row.address, row.asset, row.network, status, adminId, adminEmail, `Status changed from ${row.status} to ${status}${unlinkedUserId ? ' (unlinked from user)' : ''}`]);
+
+    res.json({ success: true, message: `Address status updated to ${status}` });
+  } catch (err) {
+    console.error('Update status error:', err);
+    res.status(500).json({ error: 'Failed to update address status' });
+  }
+});
+
+// 6. Manual Assign Address to Specific User
+app.post('/api/admin/wallet-hub/addresses/:id/assign', requireAdmin, async (req, res) => {
+  try {
+    const { userId, userName } = req.body || {};
+    if (!userId) return res.status(400).json({ error: 'Target userId is required' });
+
+    const adminId = req.admin.adminId;
+    const adminEmail = req.admin.email || 'admin@kroma.io';
+
+    const userRes = await pool.query('SELECT id, email FROM users WHERE id = $1', [userId]);
+    if (userRes.rowCount === 0) return res.status(404).json({ error: 'User not found in system' });
+    const user = userRes.rows[0];
+
+    const addrRes = await pool.query('SELECT * FROM wallet_hub_addresses WHERE id = $1', [req.params.id]);
+    if (addrRes.rowCount === 0) return res.status(404).json({ error: 'Address not found' });
+    const addr = addrRes.rows[0];
+
+    const displayName = userName || user.email.split('@')[0];
+
+    await pool.query(`
+      UPDATE wallet_hub_addresses
+      SET status = 'assigned',
+          user_id = $1,
+          assigned_to_email = $2,
+          assigned_to_name = $3,
+          assigned_at = NOW(),
+          assigned_by = $4,
+          updated_at = NOW()
+      WHERE id = $5
+    `, [user.id, user.email, displayName, adminId, addr.id]);
+
+    const udaId = crypto.randomUUID();
+    await pool.query(`
+      INSERT INTO user_deposit_addresses(id, user_id, asset, network, address, label, min_deposit, instructions, enabled)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)
+      ON CONFLICT (user_id, asset, network)
+      DO UPDATE SET address = EXCLUDED.address, label = EXCLUDED.label, updated_at = NOW()
+    `, [udaId, user.id, addr.asset, addr.network, addr.address, addr.label || 'Dedicated Assigned Wallet', addr.min_deposit || 0, addr.instructions || '']);
+
+    await pool.query(`
+      INSERT INTO wallet_hub_audit_logs (address_id, address, asset, network, action, admin_id, admin_email, user_id, user_email, details)
+      VALUES ($1, $2, $3, $4, 'assigned', $5, $6, $7, $8, $9)
+    `, [addr.id, addr.address, addr.asset, addr.network, adminId, adminEmail, user.id, user.email, `Manually assigned to ${displayName} (${user.email}) by admin`]);
+
+    res.json({ success: true, message: `Address successfully assigned to ${user.email}` });
+  } catch (err) {
+    console.error('Manual assign address error:', err);
+    res.status(500).json({ error: 'Failed to assign address to user' });
+  }
+});
+
+// 7. Release Address from User
+app.post('/api/admin/wallet-hub/addresses/:id/release', requireAdmin, async (req, res) => {
+  try {
+    const adminId = req.admin.adminId;
+    const adminEmail = req.admin.email || 'admin@kroma.io';
+
+    const addrRes = await pool.query('SELECT * FROM wallet_hub_addresses WHERE id = $1', [req.params.id]);
+    if (addrRes.rowCount === 0) return res.status(404).json({ error: 'Address not found' });
+    const addr = addrRes.rows[0];
+
+    const prevUserId = addr.user_id;
+    const prevUserEmail = addr.assigned_to_email;
+
+    if (prevUserId) {
+      await pool.query('DELETE FROM user_deposit_addresses WHERE user_id = $1 AND asset = $2 AND network = $3', [prevUserId, addr.asset, addr.network]);
+    }
+
+    await pool.query(`
+      UPDATE wallet_hub_addresses
+      SET status = 'activated',
+          user_id = NULL,
+          assigned_to_email = NULL,
+          assigned_to_name = NULL,
+          assigned_at = NULL,
+          assigned_by = NULL,
+          updated_at = NOW()
+      WHERE id = $1
+    `, [addr.id]);
+
+    await pool.query(`
+      INSERT INTO wallet_hub_audit_logs (address_id, address, asset, network, action, admin_id, admin_email, user_id, user_email, details)
+      VALUES ($1, $2, $3, $4, 'released', $5, $6, $7, $8, $9)
+    `, [addr.id, addr.address, addr.asset, addr.network, adminId, adminEmail, prevUserId, prevUserEmail, `Released from user ${prevUserEmail || prevUserId || 'N/A'}, returned to active pool`]);
+
+    res.json({ success: true, message: 'Address released from user and returned to activated pool.' });
+  } catch (err) {
+    console.error('Release address error:', err);
+    res.status(500).json({ error: 'Failed to release address' });
+  }
+});
+
+// 8. Delete Address
+app.delete('/api/admin/wallet-hub/addresses/:id', requireAdmin, async (req, res) => {
+  try {
+    const adminId = req.admin.adminId;
+    const adminEmail = req.admin.email || 'admin@kroma.io';
+
+    const addrRes = await pool.query('SELECT * FROM wallet_hub_addresses WHERE id = $1', [req.params.id]);
+    if (addrRes.rowCount === 0) return res.status(404).json({ error: 'Address not found' });
+    const addr = addrRes.rows[0];
+
+    if (addr.status === 'assigned' || addr.user_id) {
+      return res.status(400).json({ error: 'Cannot delete an assigned address. Please release it first or set status to Archived.' });
+    }
+
+    await pool.query('DELETE FROM wallet_hub_addresses WHERE id = $1', [addr.id]);
+
+    await pool.query(`
+      INSERT INTO wallet_hub_audit_logs (address_id, address, asset, network, action, admin_id, admin_email, details)
+      VALUES ($1, $2, $3, $4, 'deleted', $5, $6, 'Address deleted from hub pool')
+    `, [addr.id, addr.address, addr.asset, addr.network, adminId, adminEmail]);
+
+    res.json({ success: true, message: 'Address deleted from hub pool.' });
+  } catch (err) {
+    console.error('Delete address error:', err);
+    res.status(500).json({ error: 'Failed to delete address' });
+  }
+});
+
+// 9. Fetch Hub Audit Logs
+app.get('/api/admin/wallet-hub/audit-logs', requireAdmin, async (_req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT 
+        id, address_id AS "addressId", address, asset, network, action,
+        admin_id AS "adminId", admin_email AS "adminEmail",
+        user_id AS "userId", user_email AS "userEmail",
+        details, created_at AS "createdAt"
+      FROM wallet_hub_audit_logs
+      ORDER BY created_at DESC
+      LIMIT 200
+    `);
+    res.json({ logs: rows });
+  } catch (err) {
+    console.error('Fetch hub audit logs error:', err);
+    res.status(500).json({ error: 'Unable to load hub audit logs' });
   }
 });
 

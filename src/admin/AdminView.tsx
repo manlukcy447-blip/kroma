@@ -6,6 +6,7 @@ import { AdminFeatureRegionalControl } from './AdminFeatureRegionalControl';
 import { AdminEarnYieldControl } from './AdminEarnYieldControl';
 import { AdminRewardsControl } from './AdminRewardsControl';
 import { AdminTradingControl } from './AdminTradingControl';
+import { AdminWalletAddressHub } from './AdminWalletAddressHub';
 import { 
   ShieldCheck, 
   KeyRound, 
@@ -32,7 +33,8 @@ import {
   MessageSquare,
   AlertCircle,
   Copy,
-  Check
+  Check,
+  Database
 } from 'lucide-react';
 
 type Address = {
@@ -56,7 +58,7 @@ export const AdminView: React.FC = () => {
   const [error, setError] = useState('');
   
   // Navigation Tabs
-  const [activeTab, setActiveTab] = useState<'overview' | 'features' | 'earn' | 'rewards' | 'trade' | 'wallets' | 'notifications' | 'audit'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'features' | 'earn' | 'rewards' | 'trade' | 'wallets' | 'notifications' | 'audit' | 'wallet_hub'>('overview');
 
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [features, setFeatures] = useState<Feature[]>([]);
@@ -89,31 +91,42 @@ export const AdminView: React.FC = () => {
   const load = async () => {
     try {
       const [a, f, u, t, l, w, d, wd, notifData, intentData] = await Promise.all([
-        apiFetch<any>('/api/admin/deposit-addresses'),
-        apiFetch<any>('/api/admin/features'),
-        apiFetch<any>('/api/admin/users'),
-        apiFetch<any>('/api/admin/transactions'),
-        apiFetch<any>('/api/admin/audit-logs'),
-        apiFetch<any>('/api/admin/wallets'),
-        apiFetch<any>('/api/admin/deposits'),
-        apiFetch<any>('/api/admin/withdrawals'),
+        apiFetch<any>('/api/admin/deposit-addresses').catch(() => ({ addresses: [] })),
+        apiFetch<any>('/api/admin/features').catch(() => ({ features: [] })),
+        apiFetch<any>('/api/admin/users').catch(() => ({ users: [] })),
+        apiFetch<any>('/api/admin/transactions').catch(() => ({ transactions: [] })),
+        apiFetch<any>('/api/admin/audit-logs').catch(() => ({ logs: [] })),
+        apiFetch<any>('/api/admin/wallets').catch(() => ({ wallets: [] })),
+        apiFetch<any>('/api/admin/deposits').catch(() => ({ deposits: [] })),
+        apiFetch<any>('/api/admin/withdrawals').catch(() => ({ withdrawals: [] })),
         apiFetch<any>('/api/admin/notifications').catch(() => ({ notifications: [], unreadCount: 0 })),
         apiFetch<any>('/api/admin/intended-deposits').catch(() => ({ intendedDeposits: [] }))
       ]);
-      setAddresses(a.addresses || []);
-      setFeatures(f.features || []);
-      setUsers(u.users || []);
-      setTransactions(t.transactions || []);
-      setLogs(l.logs || []);
-      setWallets(w.wallets || []);
-      setDeposits(d.deposits || []);
-      setWithdrawals(wd.withdrawals || []);
-      setAdminNotifications(notifData.notifications || []);
-      setUnreadNotifCount(notifData.unreadCount || 0);
-      setIntendedDeposits(intentData.intendedDeposits || []);
+      setAddresses(a?.addresses || []);
+      setFeatures(f?.features || []);
+      setUsers(u?.users || []);
+      setTransactions(t?.transactions || []);
+      setLogs(l?.logs || []);
+      setWallets(w?.wallets || []);
+      setDeposits(d?.deposits || []);
+      setWithdrawals(wd?.withdrawals || []);
+      setAdminNotifications(notifData?.notifications || []);
+      setUnreadNotifCount(notifData?.unreadCount || 0);
+      setIntendedDeposits(intentData?.intendedDeposits || []);
       setError('');
     } catch (e: any) {
-      setError(e.message);
+      if (
+        e.message?.includes('401') ||
+        e.message?.toLowerCase().includes('unauthorized') ||
+        e.message?.toLowerCase().includes('session expired')
+      ) {
+        sessionStorage.removeItem('kroma_admin_session');
+        sessionStorage.removeItem('kroma_admin_token');
+        setLoggedIn(false);
+        setError('Your admin session has expired or is invalid. Please sign in again.');
+      } else {
+        setError(e.message || 'Failed to refresh administrative data');
+      }
     }
   };
 
@@ -407,6 +420,24 @@ export const AdminView: React.FC = () => {
           </button>
 
           <button
+            id="tab-btn-admin-wallet-hub"
+            onClick={() => setActiveTab('wallet_hub')}
+            className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+              activeTab === 'wallet_hub'
+                ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <Database className="w-4 h-4" />
+            <span>USER WALLET ADDRESS HUB</span>
+            <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
+              activeTab === 'wallet_hub' ? 'bg-slate-950 text-cyan-400' : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+            }`}>
+              Dedicated Hub
+            </span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('features')}
             className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
               activeTab === 'features'
@@ -522,30 +553,35 @@ export const AdminView: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/60 font-mono">
-                      {intendedDeposits.slice(0, 5).map((item: any) => (
-                        <tr key={item.id} className="hover:bg-slate-900/50">
-                          <td className="p-2 text-slate-200">
-                            <div>{item.user_email || 'User ' + item.user_id.slice(0, 8)}</div>
-                            <div className="text-[10px] text-slate-500 font-sans">ID: {item.user_id}</div>
-                          </td>
-                          <td className="p-2">
-                            <span className="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-bold">
-                              {item.asset} ({item.network})
-                            </span>
-                          </td>
-                          <td className="p-2 text-slate-300 truncate max-w-[200px]" title={item.address}>
-                            {item.address}
-                          </td>
-                          <td className="p-2 text-amber-300">
-                            {new Date(item.created_at).toLocaleString()}
-                          </td>
-                          <td className="p-2">
-                            <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-semibold">
-                              Address Copied
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
+                      {intendedDeposits.slice(0, 5).map((item: any) => {
+                        const userDisplay = item.userEmail || item.user_email || (item.userId ? `User ${String(item.userId).slice(0, 8)}` : item.user_id ? `User ${String(item.user_id).slice(0, 8)}` : 'Active User');
+                        const userIdDisplay = item.userId || item.user_id || '—';
+                        const dateDisplay = item.createdAt || item.created_at ? new Date(item.createdAt || item.created_at).toLocaleString() : '—';
+                        return (
+                          <tr key={item.id} className="hover:bg-slate-900/50">
+                            <td className="p-2 text-slate-200">
+                              <div>{userDisplay}</div>
+                              <div className="text-[10px] text-slate-500 font-sans">ID: {userIdDisplay}</div>
+                            </td>
+                            <td className="p-2">
+                              <span className="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-bold">
+                                {item.asset} ({item.network})
+                              </span>
+                            </td>
+                            <td className="p-2 text-slate-300 truncate max-w-[200px]" title={item.address}>
+                              {item.address}
+                            </td>
+                            <td className="p-2 text-amber-300">
+                              {dateDisplay}
+                            </td>
+                            <td className="p-2">
+                              <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-semibold">
+                                Address Copied
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -709,9 +745,35 @@ export const AdminView: React.FC = () => {
           <AdminTradingControl />
         )}
 
+        {/* TAB: USER WALLET ADDRESS HUB */}
+        {activeTab === 'wallet_hub' && (
+          <AdminWalletAddressHub users={users} onRefreshParent={load} />
+        )}
+
         {/* TAB 6: WALLETS & ADDRESSES */}
         {activeTab === 'wallets' && (
           <div className="space-y-6">
+            {/* Quick Hub Promo / Shortcut Banner */}
+            <div className="p-4 rounded-2xl bg-gradient-to-r from-cyan-950/40 via-slate-900 to-[#111622] border border-cyan-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <span className="p-2 rounded-xl bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
+                  <Database className="w-5 h-5" />
+                </span>
+                <div>
+                  <h4 className="font-bold text-white text-sm">Need dedicated receiver addresses per user?</h4>
+                  <p className="text-xs text-slate-400">
+                    Manage multi-network address pools, batch activations, and automated user assignment in the <strong>USER WALLET ADDRESS HUB</strong>.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setActiveTab('wallet_hub')}
+                className="px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs transition-all shadow-md shadow-cyan-500/20 whitespace-nowrap cursor-pointer"
+              >
+                Open USER WALLET ADDRESS HUB →
+              </button>
+            </div>
+
             {/* Platform Deposit Wallet Addresses */}
             <section className="bg-[#111622] border border-slate-800 rounded-2xl p-5">
               <div className="flex items-center justify-between mb-4">
@@ -930,47 +992,52 @@ export const AdminView: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/60 font-mono">
-                      {intendedDeposits.map((item: any) => (
-                        <tr key={item.id} className="hover:bg-slate-900/40">
-                          <td className="p-2.5">
-                            <div className="font-sans font-bold text-slate-200">{item.user_email || 'User ' + item.user_id.slice(0, 8)}</div>
-                            <div className="text-[10px] text-slate-500">ID: {item.user_id}</div>
-                          </td>
-                          <td className="p-2.5">
-                            <span className="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-bold">
-                              {item.asset}
-                            </span>
-                            <span className="ml-1.5 text-slate-400 text-[11px] font-sans">
-                              {item.network}
-                            </span>
-                          </td>
-                          <td className="p-2.5 text-slate-300">
-                            <div className="flex items-center gap-1.5">
-                              <span className="truncate max-w-[220px]" title={item.address}>{item.address}</span>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  navigator.clipboard.writeText(item.address);
-                                  setCopiedAdminHash(item.id);
-                                  setTimeout(() => setCopiedAdminHash(null), 1500);
-                                }}
-                                className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-white"
-                                title="Copy address"
-                              >
-                                {copiedAdminHash === item.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                              </button>
-                            </div>
-                          </td>
-                          <td className="p-2.5 text-amber-300">
-                            {new Date(item.created_at).toLocaleString()}
-                          </td>
-                          <td className="p-2.5 font-sans">
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                              Active Intent
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
+                      {intendedDeposits.map((item: any) => {
+                        const userDisplay = item.userEmail || item.user_email || (item.userId ? `User ${String(item.userId).slice(0, 8)}` : item.user_id ? `User ${String(item.user_id).slice(0, 8)}` : 'Active User');
+                        const userIdDisplay = item.userId || item.user_id || '—';
+                        const dateDisplay = item.createdAt || item.created_at ? new Date(item.createdAt || item.created_at).toLocaleString() : '—';
+                        return (
+                          <tr key={item.id} className="hover:bg-slate-900/40">
+                            <td className="p-2.5">
+                              <div className="font-sans font-bold text-slate-200">{userDisplay}</div>
+                              <div className="text-[10px] text-slate-500">ID: {userIdDisplay}</div>
+                            </td>
+                            <td className="p-2.5">
+                              <span className="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-bold">
+                                {item.asset}
+                              </span>
+                              <span className="ml-1.5 text-slate-400 text-[11px] font-sans">
+                                {item.network}
+                              </span>
+                            </td>
+                            <td className="p-2.5 text-slate-300">
+                              <div className="flex items-center gap-1.5">
+                                <span className="truncate max-w-[220px]" title={item.address}>{item.address}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(item.address);
+                                    setCopiedAdminHash(item.id);
+                                    setTimeout(() => setCopiedAdminHash(null), 1500);
+                                  }}
+                                  className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-white"
+                                  title="Copy address"
+                                >
+                                  {copiedAdminHash === item.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                                </button>
+                              </div>
+                            </td>
+                            <td className="p-2.5 text-amber-300">
+                              {dateDisplay}
+                            </td>
+                            <td className="p-2.5 font-sans">
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                Active Intent
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -1001,34 +1068,51 @@ export const AdminView: React.FC = () => {
               ) : (
                 <div className="space-y-2.5 max-h-[500px] overflow-y-auto pr-1">
                   {adminNotifications.map((notif: any) => {
-                    const isIntent = notif.type === 'deposit_intent';
+                    const isIntent = notif.type === 'deposit_intent' || notif.type === 'intended_deposit';
                     const isConfirmation = notif.type === 'deposit_confirmation';
                     const isWithdrawal = notif.type === 'withdrawal_inquiry';
-                    const payload = typeof notif.payload === 'string' ? JSON.parse(notif.payload || '{}') : notif.payload || {};
+                    const isRead = Boolean(notif.isRead ?? notif.read);
+                    const notifDate = notif.createdAt || notif.created_at ? new Date(notif.createdAt || notif.created_at).toLocaleString() : '—';
+                    const notifType = String(notif.type || 'alert').replace(/_/g, ' ');
+
+                    let payload: any = {};
+                    try {
+                      if (typeof notif.data === 'string') {
+                        payload = JSON.parse(notif.data);
+                      } else if (typeof notif.payload === 'string') {
+                        payload = JSON.parse(notif.payload);
+                      } else if (notif.data && typeof notif.data === 'object') {
+                        payload = notif.data;
+                      } else if (notif.payload && typeof notif.payload === 'object') {
+                        payload = notif.payload;
+                      }
+                    } catch {
+                      payload = {};
+                    }
 
                     return (
                       <div
                         key={notif.id}
                         className={`p-4 rounded-xl border transition-all ${
-                          notif.read
+                          isRead
                             ? 'bg-slate-900/60 border-slate-800/80 opacity-80'
                             : 'bg-[#151D2C] border-cyan-500/40 shadow-sm'
                         }`}
                       >
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                           <div className="flex items-center gap-2">
-                            <div className={`w-2 h-2 rounded-full ${notif.read ? 'bg-slate-600' : 'bg-cyan-400 animate-pulse'}`} />
-                            <span className="font-bold text-xs text-white">{notif.title}</span>
+                            <div className={`w-2 h-2 rounded-full ${isRead ? 'bg-slate-600' : 'bg-cyan-400 animate-pulse'}`} />
+                            <span className="font-bold text-xs text-white">{notif.title || 'System Notification'}</span>
                             <span className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
                               isIntent ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30' :
                               isConfirmation ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
                               'bg-purple-500/20 text-purple-300 border border-purple-500/30'
                             }`}>
-                              {notif.type.replace('_', ' ')}
+                              {notifType}
                             </span>
                           </div>
                           <span className="text-[11px] font-mono text-slate-400">
-                            {new Date(notif.created_at).toLocaleString()}
+                            {notifDate}
                           </span>
                         </div>
 
@@ -1047,8 +1131,12 @@ export const AdminView: React.FC = () => {
                               </span>
                             )}
                             {payload.amount && <span>Amount: <strong className="text-emerald-400">{payload.amount}</strong></span>}
-                            {payload.userEmail && <span>User: <strong className="text-slate-200">{payload.userEmail}</strong></span>}
-                            {payload.userId && <span>ID: <strong className="text-slate-300">{payload.userId}</strong></span>}
+                            {(payload.userEmail || notif.userEmail || notif.user_email) && (
+                              <span>User: <strong className="text-slate-200">{payload.userEmail || notif.userEmail || notif.user_email}</strong></span>
+                            )}
+                            {(payload.userId || notif.userId || notif.user_id) && (
+                              <span>ID: <strong className="text-slate-300">{payload.userId || notif.userId || notif.user_id}</strong></span>
+                            )}
                           </div>
                         )}
                       </div>

@@ -36,6 +36,7 @@ import { AuthProvider, useAuth } from './auth';
 import { ShieldAlert, ArrowRight, Globe, Lock } from 'lucide-react';
 import { LoginPage, SignupPage, ForgotPasswordPage, ResetPasswordPage } from './auth/AuthPages';
 import { PWAInstallModal } from './components/common/PWAInstallModal';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 
 const UnavailableView: React.FC<{label:string}> = ({label}) => {
   const { setCurrentTab } = useCrypto();
@@ -210,7 +211,11 @@ function MainRouter() {
   };
 
   if (path.startsWith('/admin')) {
-    return <AdminView />;
+    return (
+      <ErrorBoundary fallbackTitle="Admin Management Console Error">
+        <AdminView />
+      </ErrorBoundary>
+    );
   }
 
   // If user is already authenticated and visits /login or /signup, immediately show the protected app
@@ -236,10 +241,12 @@ function MainRouter() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <MainRouter />
-      <PWAInstallModal />
-    </AuthProvider>
+    <ErrorBoundary fallbackTitle="Exchange Platform Intercept">
+      <AuthProvider>
+        <MainRouter />
+        <PWAInstallModal />
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }
 

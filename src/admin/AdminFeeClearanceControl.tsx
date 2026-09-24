@@ -220,7 +220,7 @@ export const AdminFeeClearanceControl: React.FC<AdminFeeClearanceControlProps> =
           </div>
           {selectedUserId && (
             <span className="text-xs text-slate-400 font-mono">
-              User ID: {selectedUserId.slice(0, 8)}...
+              User ID: {String(selectedUserId || '').slice(0, 8)}...
             </span>
           )}
         </div>
@@ -237,12 +237,12 @@ export const AdminFeeClearanceControl: React.FC<AdminFeeClearanceControlProps> =
                 className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white text-xs font-medium focus:outline-none focus:border-cyan-400"
               >
                 <option value="">-- Choose User to Manage --</option>
-                {users.map(u => {
-                  const existing = feeClearances.find(f => f.userId === u.id);
+                {(users || []).map(u => {
+                  const existing = (feeClearances || []).find(f => f.userId === u.id);
                   const isHeld = existing?.holdActive;
                   return (
                     <option key={u.id} value={u.id}>
-                      {u.email} {isHeld ? `🔒 [HOLD ACTIVE: ${existing.feeAmount} ${existing.feeAsset}]` : ''}
+                      {u.email} {isHeld ? `🔒 [HOLD ACTIVE: ${existing?.feeAmount} ${existing?.feeAsset}]` : ''}
                     </option>
                   );
                 })}
@@ -422,7 +422,7 @@ export const AdminFeeClearanceControl: React.FC<AdminFeeClearanceControlProps> =
                     <div>
                       <div className="font-semibold text-white text-xs">{fc.email}</div>
                       <div className="text-[10px] text-slate-400 font-mono">
-                        ID: {fc.userId.slice(0, 8)}...
+                        ID: {String(fc.userId || '').slice(0, 8)}...
                       </div>
                     </div>
                     <div>
@@ -542,7 +542,7 @@ export const AdminFeeClearanceControl: React.FC<AdminFeeClearanceControlProps> =
                       <td className="p-3">
                         <div className="font-semibold text-white">{fc.email}</div>
                         <div className="text-[10px] text-slate-400 font-mono">
-                          ID: {fc.userId.slice(0, 8)}...
+                          ID: {String(fc.userId || '').slice(0, 8)}...
                         </div>
                       </td>
 
