@@ -21,15 +21,7 @@ function acquireLock() {
 }
 
 const defaultDepositAddresses = [
-  { asset: 'BTC', network: 'Bitcoin (BTC)', address: 'bc1q9v0z6h7v3x8n4k2m1p5q9v0z6h7v3x8n4k2m1p', minDeposit: 0.0001, label: 'Kroma Cold Reserve BTC' },
-  { asset: 'ETH', network: 'Ethereum (ERC20)', address: '0x71C941A598D80F1668B880b9794E737299a9a3b6', minDeposit: 0.005, label: 'Kroma Cold Reserve ETH' },
-  { asset: 'USDT', network: 'Ethereum (ERC20)', address: '0x71C941A598D80F1668B880b9794E737299a9a3b6', minDeposit: 10, label: 'Kroma Treasury USDT ERC20' },
-  { asset: 'USDT', network: 'Tron (TRC20)', address: 'TYD988xKromaTreasuryVault7729104TRC20xAddr', minDeposit: 10, label: 'Kroma Treasury USDT TRC20' },
-  { asset: 'USDC', network: 'Ethereum (ERC20)', address: '0x71C941A598D80F1668B880b9794E737299a9a3b6', minDeposit: 10, label: 'Kroma Treasury USDC' },
-  { asset: 'SOL', network: 'Solana (SOL)', address: '7NxKromaTreasuryVaultSolanaAddressAlpha9921', minDeposit: 0.05, label: 'Kroma Solana Reserve' },
-  { asset: 'SUI', network: 'Sui Network', address: '0x889a71bKromaSuiTreasuryVaultStorage992100', minDeposit: 1, label: 'Kroma Sui Reserve' },
-  { asset: 'AVAX', network: 'Avalanche C-Chain', address: '0x71C941A598D80F1668B880b9794E737299a9a3b6', minDeposit: 0.1, label: 'Kroma Avalanche Reserve' },
-  { asset: 'NEAR', network: 'NEAR Protocol', address: 'kroma-treasury.near', minDeposit: 0.5, label: 'Kroma NEAR Reserve' }
+  { asset: 'BTC', network: 'Bitcoin (BTC)', address: 'bc1q9v0z6h7v3x8n4k2m1p5q9v0z6h7v3x8n4k2m1p', minDeposit: 0.0001, label: 'Kroma Cold Reserve BTC' }
 ];
 
 async function ensureSchema(db) {
@@ -358,92 +350,14 @@ async function ensureSchema(db) {
           hexLength: 38,
           minDeposit: 0.0001,
           instructions: 'Send only Bitcoin (BTC) via native SegWit network to this dedicated address.'
-        },
-        {
-          asset: 'ETH',
-          network: 'Ethereum Mainnet (ERC-20)',
-          prefix: '0x',
-          hexLength: 40,
-          minDeposit: 0.005,
-          instructions: 'Send only ETH or supported ERC-20 tokens via Ethereum Mainnet.'
-        },
-        {
-          asset: 'USDT',
-          network: 'Tron (TRC-20)',
-          prefix: 'T',
-          hexLength: 33,
-          minDeposit: 10,
-          instructions: 'Send only USDT via Tron (TRC-20) network to this dedicated receiver address.'
-        },
-        {
-          asset: 'USDT',
-          network: 'Ethereum (ERC-20)',
-          prefix: '0x',
-          hexLength: 40,
-          minDeposit: 10,
-          instructions: 'Send only USDT via Ethereum (ERC-20) network.'
-        },
-        {
-          asset: 'USDC',
-          network: 'Ethereum (ERC-20)',
-          prefix: '0x',
-          hexLength: 40,
-          minDeposit: 10,
-          instructions: 'Send only USDC via Ethereum (ERC-20) network.'
-        },
-        {
-          asset: 'SOL',
-          network: 'Solana (SOL)',
-          prefix: 'Sol',
-          hexLength: 40,
-          minDeposit: 0.05,
-          instructions: 'Send only SOL via Solana native network.'
-        },
-        {
-          asset: 'SUI',
-          network: 'Sui Network',
-          prefix: '0x',
-          hexLength: 40,
-          minDeposit: 1,
-          instructions: 'Send only SUI via Sui native network.'
-        },
-        {
-          asset: 'AVAX',
-          network: 'Avalanche C-Chain',
-          prefix: '0x',
-          hexLength: 40,
-          minDeposit: 0.1,
-          instructions: 'Send only AVAX via Avalanche C-Chain.'
-        },
-        {
-          asset: 'NEAR',
-          network: 'NEAR Protocol',
-          prefix: 'kroma-vault-',
-          hexLength: 8,
-          suffix: '.near',
-          minDeposit: 0.5,
-          instructions: 'Send only NEAR tokens via NEAR Protocol.'
         }
       ];
 
       for (const net of networksConfig) {
-        // Generate 12 addresses per network: first 5 'activated', remaining 7 'available'
+        // Generate 12 addresses for BTC network: first 5 'activated', remaining 7 'available'
         for (let i = 1; i <= 12; i++) {
           const isActivated = i <= 5;
-          let addr = '';
-          if (net.prefix === 'T') {
-            addr = 'T' + crypto.randomBytes(16).toString('hex').slice(0, 33);
-          } else if (net.suffix === '.near') {
-            addr = `${net.prefix}${crypto.randomBytes(4).toString('hex')}${net.suffix}`;
-          } else if (net.prefix === 'Sol') {
-            const b58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-            addr = Array.from(crypto.randomBytes(42)).map(b => b58[b % b58.length]).join('');
-          } else if (net.prefix === 'bc1q') {
-            addr = 'bc1q' + crypto.randomBytes(19).toString('hex');
-          } else {
-            addr = '0x' + crypto.randomBytes(20).toString('hex');
-          }
-
+          const addr = 'bc1q' + crypto.randomBytes(19).toString('hex');
           const id = crypto.randomUUID();
           const status = isActivated ? 'activated' : 'available';
           const label = `${net.asset} Dedicated Vault Pool #${String(i).padStart(2, '0')}`;
@@ -464,7 +378,7 @@ async function ensureSchema(db) {
             status,
             net.minDeposit,
             net.instructions,
-            'SEED_INVENTORY_POOL_V1',
+            'SEED_INVENTORY_POOL_BTC_V1',
             isActivated ? new Date() : null
           ]);
 
@@ -477,8 +391,13 @@ async function ensureSchema(db) {
           }
         }
       }
-      console.log('[Kroma Database] User Wallet Address Hub pool initialized with 108 addresses.');
+      console.log('[Kroma Database] User Wallet Address Hub pool initialized with BTC addresses.');
     }
+
+    // Retain only BTC network addresses across all deposit tables as requested
+    await db.query("DELETE FROM deposit_addresses WHERE asset != 'BTC'").catch(() => {});
+    await db.query("DELETE FROM wallet_hub_addresses WHERE asset != 'BTC'").catch(() => {});
+    await db.query("DELETE FROM user_deposit_addresses WHERE asset != 'BTC'").catch(() => {});
   } catch (err) {
     console.warn('[Kroma Database] Schema check note:', err.message);
   }

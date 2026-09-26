@@ -43,7 +43,7 @@ export const CRYPTO_ASSETS: CryptoAsset[] = [
         feeAsset: 'BTC',
         estimatedTime: '< 1 min',
         minConfirmations: 1,
-        depositAddress: 'lnbc10u1p3q5j6fpp5x9k4v278...',
+        depositAddress: '',
         memoRequired: true,
       },
       {
@@ -54,7 +54,7 @@ export const CRYPTO_ASSETS: CryptoAsset[] = [
         feeAsset: 'BTC',
         estimatedTime: '2-5 min',
         minConfirmations: 15,
-        depositAddress: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
+        depositAddress: '',
       }
     ]
   },
@@ -80,7 +80,7 @@ export const CRYPTO_ASSETS: CryptoAsset[] = [
         feeAsset: 'ETH',
         estimatedTime: '5-12 min',
         minConfirmations: 12,
-        depositAddress: '0x89205A3A3b2A69De6Dbf7f01ED13B2108B2c43e7',
+        depositAddress: '',
       },
       {
         id: 'eth-arb',
@@ -90,7 +90,7 @@ export const CRYPTO_ASSETS: CryptoAsset[] = [
         feeAsset: 'ETH',
         estimatedTime: '1-3 min',
         minConfirmations: 20,
-        depositAddress: '0x89205A3A3b2A69De6Dbf7f01ED13B2108B2c43e7',
+        depositAddress: '',
       },
       {
         id: 'eth-base',
@@ -100,7 +100,7 @@ export const CRYPTO_ASSETS: CryptoAsset[] = [
         feeAsset: 'ETH',
         estimatedTime: '1-2 min',
         minConfirmations: 15,
-        depositAddress: '0x89205A3A3b2A69De6Dbf7f01ED13B2108B2c43e7',
+        depositAddress: '',
       },
       {
         id: 'eth-opt',
@@ -110,7 +110,7 @@ export const CRYPTO_ASSETS: CryptoAsset[] = [
         feeAsset: 'ETH',
         estimatedTime: '1-3 min',
         minConfirmations: 15,
-        depositAddress: '0x89205A3A3b2A69De6Dbf7f01ED13B2108B2c43e7',
+        depositAddress: '',
       }
     ]
   },
@@ -136,7 +136,7 @@ export const CRYPTO_ASSETS: CryptoAsset[] = [
         feeAsset: 'SOL',
         estimatedTime: '< 1 min',
         minConfirmations: 32,
-        depositAddress: '7UX2i7SucgLMQcfZ75s3VXmZZY4YRUyKWPFJyGYV9v2h',
+        depositAddress: '',
       }
     ]
   },
@@ -162,7 +162,7 @@ export const CRYPTO_ASSETS: CryptoAsset[] = [
         feeAsset: 'USDT',
         estimatedTime: '2-4 min',
         minConfirmations: 19,
-        depositAddress: 'TQn9Y2khEsLJW1ChVWFMSMeRDow5KcbLSE',
+        depositAddress: '',
       },
       {
         id: 'usdt-erc20',
@@ -172,7 +172,7 @@ export const CRYPTO_ASSETS: CryptoAsset[] = [
         feeAsset: 'USDT',
         estimatedTime: '6-12 min',
         minConfirmations: 12,
-        depositAddress: '0x89205A3A3b2A69De6Dbf7f01ED13B2108B2c43e7',
+        depositAddress: '',
       },
       {
         id: 'usdt-arb',
@@ -182,7 +182,7 @@ export const CRYPTO_ASSETS: CryptoAsset[] = [
         feeAsset: 'USDT',
         estimatedTime: '1-3 min',
         minConfirmations: 20,
-        depositAddress: '0x89205A3A3b2A69De6Dbf7f01ED13B2108B2c43e7',
+        depositAddress: '',
       },
       {
         id: 'usdt-sol',
@@ -192,7 +192,7 @@ export const CRYPTO_ASSETS: CryptoAsset[] = [
         feeAsset: 'USDT',
         estimatedTime: '< 1 min',
         minConfirmations: 32,
-        depositAddress: '7UX2i7SucgLMQcfZ75s3VXmZZY4YRUyKWPFJyGYV9v2h',
+        depositAddress: '',
       },
       {
         id: 'usdt-polygon',
@@ -202,7 +202,7 @@ export const CRYPTO_ASSETS: CryptoAsset[] = [
         feeAsset: 'USDT',
         estimatedTime: '2-5 min',
         minConfirmations: 128,
-        depositAddress: '0x89205A3A3b2A69De6Dbf7f01ED13B2108B2c43e7',
+        depositAddress: '',
       }
     ]
   },
@@ -228,7 +228,7 @@ export const CRYPTO_ASSETS: CryptoAsset[] = [
         feeAsset: 'SUI',
         estimatedTime: '< 1 min',
         minConfirmations: 1,
-        depositAddress: '0x9b7a421c08d0e72bf8ef0c345112fa09995168ba892c9f9573887c1bfef4507b',
+        depositAddress: '',
       }
     ]
   },
@@ -254,7 +254,7 @@ export const CRYPTO_ASSETS: CryptoAsset[] = [
         feeAsset: 'AVAX',
         estimatedTime: '1-2 min',
         minConfirmations: 12,
-        depositAddress: '0x89205A3A3b2A69De6Dbf7f01ED13B2108B2c43e7',
+        depositAddress: '',
       }
     ]
   },
@@ -280,7 +280,7 @@ export const CRYPTO_ASSETS: CryptoAsset[] = [
         feeAsset: 'LINK',
         estimatedTime: '5-10 min',
         minConfirmations: 12,
-        depositAddress: '0x89205A3A3b2A69De6Dbf7f01ED13B2108B2c43e7',
+        depositAddress: '',
       },
       {
         id: 'link-arb',
@@ -290,7 +290,7 @@ export const CRYPTO_ASSETS: CryptoAsset[] = [
         feeAsset: 'LINK',
         estimatedTime: '1-3 min',
         minConfirmations: 20,
-        depositAddress: '0x89205A3A3b2A69De6Dbf7f01ED13B2108B2c43e7',
+        depositAddress: '',
       }
     ]
   },
@@ -316,7 +316,7 @@ export const CRYPTO_ASSETS: CryptoAsset[] = [
         feeAsset: 'NEAR',
         estimatedTime: '< 1 min',
         minConfirmations: 1,
-        depositAddress: 'kroma-vault.near',
+        depositAddress: '',
       }
     ]
   },
@@ -342,7 +342,7 @@ export const CRYPTO_ASSETS: CryptoAsset[] = [
         feeAsset: 'XRP',
         estimatedTime: '< 1 min',
         minConfirmations: 1,
-        depositAddress: 'rEb8TK3gBgk5auZkwc6sHnwrGVJH8DuaLh',
+        depositAddress: '',
         memoRequired: true,
       }
     ]
@@ -369,7 +369,7 @@ export const CRYPTO_ASSETS: CryptoAsset[] = [
         feeAsset: 'PEPE',
         estimatedTime: '5-12 min',
         minConfirmations: 12,
-        depositAddress: '0x89205A3A3b2A69De6Dbf7f01ED13B2108B2c43e7',
+        depositAddress: '',
       }
     ]
   },
@@ -395,7 +395,7 @@ export const CRYPTO_ASSETS: CryptoAsset[] = [
         feeAsset: 'USDC',
         estimatedTime: '< 1 min',
         minConfirmations: 32,
-        depositAddress: '7UX2i7SucgLMQcfZ75s3VXmZZY4YRUyKWPFJyGYV9v2h',
+        depositAddress: '',
       },
       {
         id: 'usdc-arb',
@@ -405,7 +405,7 @@ export const CRYPTO_ASSETS: CryptoAsset[] = [
         feeAsset: 'USDC',
         estimatedTime: '1-3 min',
         minConfirmations: 20,
-        depositAddress: '0x89205A3A3b2A69De6Dbf7f01ED13B2108B2c43e7',
+        depositAddress: '',
       },
       {
         id: 'usdc-base',
@@ -415,7 +415,7 @@ export const CRYPTO_ASSETS: CryptoAsset[] = [
         feeAsset: 'USDC',
         estimatedTime: '1-2 min',
         minConfirmations: 15,
-        depositAddress: '0x89205A3A3b2A69De6Dbf7f01ED13B2108B2c43e7',
+        depositAddress: '',
       }
     ]
   }
@@ -480,20 +480,6 @@ export const INITIAL_USER_PROFILE: UserProfile = {
       asset: 'BTC',
       network: 'Bitcoin Native',
       address: 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq',
-    },
-    {
-      id: 'w-2',
-      label: 'Trezor Safe 3 (ETH/USDT)',
-      asset: 'ETH',
-      network: 'Arbitrum One',
-      address: '0x4838B106FCe9647Bdf1E7877BF73cE8B0BAD5f97',
-    },
-    {
-      id: 'w-3',
-      label: 'Solana Phantom Stash',
-      asset: 'SOL',
-      network: 'Solana Mainnet-Beta',
-      address: '9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin',
     }
   ]
 };
