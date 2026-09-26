@@ -119,20 +119,16 @@ export const AdminWalletAddressHub: React.FC<AdminWalletAddressHubProps> = ({
   });
   const [importGenerateModal, setImportGenerateModal] = useState<{
     open: boolean;
-    mode: 'generate' | 'custom';
     network: string;
     asset: string;
-    generateCount: number;
     customAddresses: string;
     status: 'available' | 'activated';
   }>({
     open: false,
-    mode: 'generate',
     network: 'Tron (TRC-20)',
     asset: 'USDT',
-    generateCount: 10,
     customAddresses: '',
-    status: 'available'
+    status: 'activated'
   });
 
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -252,46 +248,41 @@ export const AdminWalletAddressHub: React.FC<AdminWalletAddressHubProps> = ({
     }
   };
 
-  // Batch Import or Generate
+  // Batch Import Manual Addresses
   const handleBatchImportOrGenerate = async () => {
     try {
-      let payload: any = {
+      const addresses = importGenerateModal.customAddresses
+        .split('\n')
+        .map(s => s.trim())
+        .filter(Boolean);
+      if (addresses.length === 0) {
+        setFeedback({ type: 'error', message: 'Enter at least one wallet address' });
+        return;
+      }
+      const payload = {
         network: importGenerateModal.network,
         asset: importGenerateModal.asset,
-        status: importGenerateModal.status
+        status: importGenerateModal.status,
+        addresses
       };
-      if (importGenerateModal.mode === 'generate') {
-        payload.generateCount = importGenerateModal.generateCount;
-      } else {
-        payload.addresses = importGenerateModal.customAddresses
-          .split('\n')
-          .map(s => s.trim())
-          .filter(Boolean);
-        if (payload.addresses.length === 0) {
-          setFeedback({ type: 'error', message: 'Enter at least one wallet address' });
-          return;
-        }
-      }
 
       const res = await apiFetch<any>('/api/admin/wallet-hub/batch-import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-      setFeedback({ type: 'success', message: res.message || `Successfully added addresses to ${importGenerateModal.network} pool` });
+      setFeedback({ type: 'success', message: res.message || `Successfully added ${addresses.length} addresses to ${importGenerateModal.network} pool` });
       setImportGenerateModal({
         open: false,
-        mode: 'generate',
         network: 'Tron (TRC-20)',
         asset: 'USDT',
-        generateCount: 10,
         customAddresses: '',
-        status: 'available'
+        status: 'activated'
       });
       fetchHubData();
       if (onRefreshParent) onRefreshParent();
     } catch (err: any) {
-      setFeedback({ type: 'error', message: err.message || 'Failed to import/generate addresses' });
+      setFeedback({ type: 'error', message: err.message || 'Failed to import addresses' });
     }
   };
 
@@ -353,7 +344,7 @@ export const AdminWalletAddressHub: React.FC<AdminWalletAddressHubProps> = ({
               className="px-3.5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition-all shadow-md shadow-cyan-500/20 cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
-              + Top-up / Generate Pool
+              + Batch Import Addresses
             </button>
           </div>
         </div>
@@ -1231,39 +1222,13 @@ export const AdminWalletAddressHub: React.FC<AdminWalletAddressHubProps> = ({
             <div className="flex items-center justify-between">
               <h3 className="text-base font-bold text-white flex items-center gap-2">
                 <Database className="w-5 h-5 text-cyan-400" />
-                <span>Top-up / Generate Pool Addresses</span>
+                <span>Manual Batch Import Addresses</span>
               </h3>
               <button
                 onClick={() => setImportGenerateModal(prev => ({ ...prev, open: false }))}
                 className="text-slate-400 hover:text-white cursor-pointer"
               >
                 ✕
-              </button>
-            </div>
-
-            {/* Mode selector */}
-            <div className="grid grid-cols-2 gap-2 bg-slate-900 p-1 rounded-xl border border-slate-800 text-xs font-bold">
-              <button
-                type="button"
-                onClick={() => setImportGenerateModal(prev => ({ ...prev, mode: 'generate' }))}
-                className={`py-2 rounded-lg transition-all cursor-pointer ${
-                  importGenerateModal.mode === 'generate'
-                    ? 'bg-cyan-500 text-slate-950'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                ⚡ Bulk Auto-Generate Fresh Pool
-              </button>
-              <button
-                type="button"
-                onClick={() => setImportGenerateModal(prev => ({ ...prev, mode: 'custom' }))}
-                className={`py-2 rounded-lg transition-all cursor-pointer ${
-                  importGenerateModal.mode === 'custom'
-                    ? 'bg-cyan-500 text-slate-950'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                ➕ Paste Custom Addresses
               </button>
             </div>
 
@@ -1306,42 +1271,21 @@ export const AdminWalletAddressHub: React.FC<AdminWalletAddressHubProps> = ({
                 </div>
               </div>
 
-              {importGenerateModal.mode === 'generate' ? (
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Number of Addresses to Generate
-                  </label>
-                  <div className="flex items-center gap-2 mb-2">
-                    {[5, 10, 20, 50].map(cnt => (
-                      <button
-                        key={cnt}
-                        type="button"
-                        onClick={() => setImportGenerateModal(prev => ({ ...prev, generateCount: cnt }))}
-                        className={`flex-1 py-1.5 rounded-lg text-xs font-bold border transition-all cursor-pointer ${
-                          importGenerateModal.generateCount === cnt
-                            ? 'bg-cyan-500 text-slate-950 border-cyan-400'
-                            : 'bg-slate-900 text-slate-300 border-slate-700'
-                        }`}
-                      >
-                        +{cnt}
-                      </button>
-                    ))}
-                  </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Paste Wallet Addresses (one per line)
+                </label>
+                <textarea
+                  rows={5}
+                  value={importGenerateModal.customAddresses}
+                  onChange={e => setImportGenerateModal(prev => ({ ...prev, customAddresses: e.target.value }))}
+                  placeholder="Paste your real addresses here, one per line:&#10;bc1q...&#10;0x...&#10;TYD..."
+                  className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-cyan-500"
+                />
+                <div className="text-[10px] text-slate-400 mt-1">
+                  Addresses will be imported into the hub. You can assign them manually to users or keep them activated in the pool.
                 </div>
-              ) : (
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Paste Addresses (one per line)
-                  </label>
-                  <textarea
-                    rows={4}
-                    value={importGenerateModal.customAddresses}
-                    onChange={e => setImportGenerateModal(prev => ({ ...prev, customAddresses: e.target.value }))}
-                    placeholder="bc1q...&#10;0x...&#10;TYD..."
-                    className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-cyan-500"
-                  />
-                </div>
-              )}
+              </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">Initial Status</label>
@@ -1385,7 +1329,7 @@ export const AdminWalletAddressHub: React.FC<AdminWalletAddressHubProps> = ({
                 onClick={handleBatchImportOrGenerate}
                 className="px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-bold shadow-md shadow-cyan-500/20 cursor-pointer"
               >
-                {importGenerateModal.mode === 'generate' ? 'Generate & Add to Pool' : 'Import Addresses'}
+                Import Addresses
               </button>
             </div>
           </div>

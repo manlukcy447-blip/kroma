@@ -790,14 +790,14 @@ export const AdminView: React.FC = () => {
                 <div className="grid md:grid-cols-2 gap-3 p-4 mb-5 rounded-xl bg-slate-900 border border-slate-800">
                   <Field label="Asset"><input value={form.asset} onChange={e => setForm({ ...form, asset: e.target.value })} className="input" /></Field>
                   <Field label="Network"><input value={form.network} onChange={e => setForm({ ...form, network: e.target.value })} className="input" /></Field>
-                  <Field label="Wallet Address"><input value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} className="input" /></Field>
-                  <Field label="Label"><input value={form.label} onChange={e => setForm({ ...form, label: e.target.value })} className="input" /></Field>
+                  <Field label="Wallet Address (Optional if Note provided)"><input value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} className="input" placeholder="e.g. bc1q... or 0x... (leave empty if replacing with note)" /></Field>
+                  <Field label="Label"><input value={form.label} onChange={e => setForm({ ...form, label: e.target.value })} className="input" placeholder="e.g. Master Cold Vault" /></Field>
                   <Field label="Minimum Deposit"><input type="number" min="0" value={form.minDeposit} onChange={e => setForm({ ...form, minDeposit: e.target.value })} className="input" /></Field>
-                  <Field label="Instructions"><input value={form.instructions} onChange={e => setForm({ ...form, instructions: e.target.value })} className="input" /></Field>
+                  <Field label="Deposit Note / Instructions (Can replace address)"><input value={form.instructions} onChange={e => setForm({ ...form, instructions: e.target.value })} className="input" placeholder="e.g. Send via TRC-20 only or custom instructions" /></Field>
                   <label className="text-sm flex items-center gap-2"><input type="checkbox" checked={form.enabled} onChange={e => setForm({ ...form, enabled: e.target.checked })} /> Active</label>
                   <div className="md:text-right">
                     <button onClick={save} className="px-4 py-2 rounded-lg bg-emerald-400 text-slate-950 font-bold text-xs">
-                      {editing ? 'Save Changes' : 'Create Address'}
+                      {editing ? 'Save Changes' : 'Save Configuration'}
                     </button>
                     {editing && (
                       <button onClick={() => setEditing(null)} className="ml-2 px-4 py-2 rounded-lg bg-slate-800 text-xs">Cancel</button>
@@ -862,14 +862,14 @@ export const AdminView: React.FC = () => {
                   <div className="grid md:grid-cols-2 gap-3 p-4 rounded-xl bg-slate-900 border border-slate-800 mb-4">
                     <Field label="Asset"><input value={userAddrForm.asset} onChange={e => setUserAddrForm({ ...userAddrForm, asset: e.target.value })} className="input" /></Field>
                     <Field label="Network"><input value={userAddrForm.network} onChange={e => setUserAddrForm({ ...userAddrForm, network: e.target.value })} className="input" /></Field>
-                    <Field label="Receiving Address"><input value={userAddrForm.address} onChange={e => setUserAddrForm({ ...userAddrForm, address: e.target.value })} className="input" /></Field>
-                    <Field label="Label"><input value={userAddrForm.label} onChange={e => setUserAddrForm({ ...userAddrForm, label: e.target.value })} className="input" /></Field>
+                    <Field label="Receiving Address (Optional if Note provided)"><input value={userAddrForm.address} onChange={e => setUserAddrForm({ ...userAddrForm, address: e.target.value })} className="input" placeholder="e.g. bc1q... or 0x... (leave empty if replacing with note)" /></Field>
+                    <Field label="Label"><input value={userAddrForm.label} onChange={e => setUserAddrForm({ ...userAddrForm, label: e.target.value })} className="input" placeholder="e.g. Dedicated User Wallet" /></Field>
                     <Field label="Minimum Deposit"><input type="number" min="0" value={userAddrForm.minDeposit} onChange={e => setUserAddrForm({ ...userAddrForm, minDeposit: e.target.value })} className="input" /></Field>
-                    <Field label="Instructions"><input value={userAddrForm.instructions} onChange={e => setUserAddrForm({ ...userAddrForm, instructions: e.target.value })} className="input" /></Field>
+                    <Field label="Deposit Note / Instructions (Can replace address)"><input value={userAddrForm.instructions} onChange={e => setUserAddrForm({ ...userAddrForm, instructions: e.target.value })} className="input" placeholder="e.g. Custom note or instructions for this user" /></Field>
                     <label className="text-sm flex items-center gap-2"><input type="checkbox" checked={userAddrForm.enabled} onChange={e => setUserAddrForm({ ...userAddrForm, enabled: e.target.checked })} /> Active</label>
                     <div>
                       <button onClick={saveUserAddress} className="px-4 py-2 rounded-lg bg-emerald-400 text-slate-950 font-bold text-xs">
-                        {editingUserAddr ? 'Save Address' : 'Add User Address'}
+                        {editingUserAddr ? 'Save Configuration' : 'Add User Address / Note'}
                       </button>
                       {editingUserAddr && (
                         <button onClick={() => { setEditingUserAddr(null); setUserAddrForm({ asset: 'USDT', network: 'TRC20', address: '', label: '', minDeposit: '0', instructions: '', enabled: true }); }} className="ml-2 px-4 py-2 rounded-lg bg-slate-800 text-xs">

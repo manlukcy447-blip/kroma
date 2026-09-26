@@ -281,6 +281,12 @@ async function ensureSchema(db) {
     `);
     await db.query('CREATE INDEX IF NOT EXISTS user_fee_clearances_user_idx ON user_fee_clearances(user_id)');
 
+    // Allow deposit_addresses and user_deposit_addresses to have NULL address if replaced by note
+    try {
+      await db.query('ALTER TABLE deposit_addresses ALTER COLUMN address DROP NOT NULL');
+      await db.query('ALTER TABLE user_deposit_addresses ALTER COLUMN address DROP NOT NULL');
+    } catch (_) {}
+
     // Seed default deposit addresses if empty
     const addrCheck = await db.query('SELECT count(*) as count FROM deposit_addresses');
     if (Number(addrCheck.rows[0]?.count || 0) === 0) {
@@ -339,65 +345,9 @@ async function ensureSchema(db) {
     `);
     await db.query('CREATE INDEX IF NOT EXISTS wallet_hub_audit_created_idx ON wallet_hub_audit_logs(created_at DESC)');
 
-    // Seed Wallet Hub pool if empty
-    const hubCount = await db.query('SELECT count(*) as count FROM wallet_hub_addresses');
-    if (Number(hubCount.rows[0]?.count || 0) === 0) {
-      const networksConfig = [
-        {
-          asset: 'BTC',
-          network: 'Bitcoin Native (SegWit)',
-          prefix: 'bc1q',
-          hexLength: 38,
-          minDeposit: 0.0001,
-          instructions: 'Send only Bitcoin (BTC) via native SegWit network to this dedicated address.'
-        }
-      ];
-
-      for (const net of networksConfig) {
-        // Generate 12 addresses for BTC network: first 5 'activated', remaining 7 'available'
-        for (let i = 1; i <= 12; i++) {
-          const isActivated = i <= 5;
-          const addr = 'bc1q' + crypto.randomBytes(19).toString('hex');
-          const id = crypto.randomUUID();
-          const status = isActivated ? 'activated' : 'available';
-          const label = `${net.asset} Dedicated Vault Pool #${String(i).padStart(2, '0')}`;
-
-          await db.query(`
-            INSERT INTO wallet_hub_addresses (
-              id, asset, network, address, label, status, min_deposit, instructions,
-              batch_id, activated_at, created_at, updated_at
-            ) VALUES (
-              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW()
-            ) ON CONFLICT (address) DO NOTHING
-          `, [
-            id,
-            net.asset,
-            net.network,
-            addr,
-            label,
-            status,
-            net.minDeposit,
-            net.instructions,
-            'SEED_INVENTORY_POOL_BTC_V1',
-            isActivated ? new Date() : null
-          ]);
-
-          if (isActivated) {
-            await db.query(`
-              INSERT INTO wallet_hub_audit_logs (
-                address_id, address, asset, network, action, admin_email, details
-              ) VALUES ($1, $2, $3, $4, 'activated', 'system@kroma.io', $5)
-            `, [id, addr, net.asset, net.network, `Address activated in initial pool inventory (${net.network})`]);
-          }
-        }
-      }
-      console.log('[Kroma Database] User Wallet Address Hub pool initialized with BTC addresses.');
-    }
-
-    // Retain only BTC network addresses across all deposit tables as requested
-    await db.query("DELETE FROM deposit_addresses WHERE asset != 'BTC'").catch(() => {});
-    await db.query("DELETE FROM wallet_hub_addresses WHERE asset != 'BTC'").catch(() => {});
-    await db.query("DELETE FROM user_deposit_addresses WHERE asset != 'BTC'").catch(() => {});
+    // User Wallet Address Hub will only contain addresses manually inserted by Admin.
+    // Clean up any previously auto-seeded addresses.
+    await db.query("DELETE FROM wallet_hub_addresses WHERE batch_id LIKE 'SEED_%'").catch(() => {});
   } catch (err) {
     console.warn('[Kroma Database] Schema check note:', err.message);
   }

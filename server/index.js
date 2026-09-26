@@ -212,64 +212,7 @@ app.get('/api/health', async (_req, res) => {
 });
 
 
-// Automatic assignment of dedicated blockchain addresses from USER WALLET ADDRESS HUB
-async function autoAssignUserAddressesFromHub(userId, userEmail, userName = '') {
-  try {
-    const displayName = userName || userEmail.split('@')[0];
-    const { rows: activatedNetworks } = await pool.query(`
-      SELECT DISTINCT asset, network 
-      FROM wallet_hub_addresses 
-      WHERE status = 'activated' AND user_id IS NULL
-    `);
 
-    for (const net of activatedNetworks) {
-      const candidate = await pool.query(`
-        SELECT id, asset, network, address, label, min_deposit, instructions 
-        FROM wallet_hub_addresses 
-        WHERE status = 'activated' AND user_id IS NULL AND asset = $1 AND network = $2 
-        ORDER BY created_at ASC LIMIT 1
-      `, [net.asset, net.network]);
-
-      if (candidate.rowCount > 0) {
-        const addrObj = candidate.rows[0];
-        await pool.query(`
-          UPDATE wallet_hub_addresses 
-          SET status = 'assigned', 
-              user_id = $1, 
-              assigned_to_email = $2, 
-              assigned_to_name = $3, 
-              assigned_at = NOW(), 
-              updated_at = NOW() 
-          WHERE id = $4
-        `, [userId, userEmail, displayName, addrObj.id]);
-
-        const udaId = crypto.randomUUID();
-        await pool.query(`
-          INSERT INTO user_deposit_addresses(id, user_id, asset, network, address, label, min_deposit, instructions, enabled)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)
-          ON CONFLICT (user_id, asset, network)
-          DO UPDATE SET address = EXCLUDED.address, label = EXCLUDED.label, updated_at = NOW()
-        `, [udaId, userId, addrObj.asset, addrObj.network, addrObj.address, addrObj.label || 'Assigned Dedicated Wallet', addrObj.min_deposit || 0, addrObj.instructions || '']);
-
-        await pool.query(`
-          INSERT INTO wallet_hub_audit_logs (
-            address_id, address, asset, network, action, user_id, user_email, details
-          ) VALUES ($1, $2, $3, $4, 'auto_assigned', $5, $6, $7)
-        `, [
-          addrObj.id, 
-          addrObj.address, 
-          addrObj.asset, 
-          addrObj.network, 
-          userId, 
-          userEmail, 
-          `Auto-assigned on new user registration: ${displayName} (${userEmail})`
-        ]);
-      }
-    }
-  } catch (err) {
-    console.error('[Kroma Hub] autoAssignUserAddressesFromHub error:', err);
-  }
-}
 
 app.post('/api/auth/signup', authRateLimit, async (req,res)=>{
   const email=String(req.body?.email||'').trim().toLowerCase(); const password=req.body?.password;
@@ -283,9 +226,7 @@ app.post('/api/auth/signup', authRateLimit, async (req,res)=>{
     const starterAssets=['BTC','ETH','USDT','USDC','SOL','SUI','AVAX','NEAR'];
     for (const asset of starterAssets) for (const accountType of ['spot','funding','earn']) await pool.query('INSERT INTO wallets(id,user_id,asset,account_type) VALUES($1,$2,$3,$4) ON CONFLICT(user_id,asset,account_type) DO NOTHING',[crypto.randomUUID(),id,asset,accountType]);
     
-    // Automatically assign dedicated receiver addresses from USER WALLET ADDRESS HUB
-    const userName = String(req.body?.name || req.body?.fullName || '').trim();
-    await autoAssignUserAddressesFromHub(id, email, userName);
+
 
     const token=signUserToken({userId:id,email,version:0,exp:Math.floor(Date.now()/1000)+60*60*24*7});
     res.setHeader('Set-Cookie',`kroma_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${7*24*60*60}${process.env.NODE_ENV==='production'?'; Secure':''}`);
@@ -1086,63 +1027,7 @@ app.get('/api/deposit-addresses/active', async (req, res) => {
       console.warn('user_deposit_addresses fetch warning:', err.message);
     }
 
-    // 2. TIER 2: Fallback to USER WALLET ADDRESS HUB (auto-claim activated address if available)
-    if (rows.length === 0) {
-      try {
-        let hubSql = `
-          SELECT id, asset, network, address, label, min_deposit AS "minDeposit", instructions
-          FROM wallet_hub_addresses
-          WHERE status = 'activated' AND user_id IS NULL AND asset = $1
-        `;
-        const hubParams = [asset];
-        if (network) {
-          hubParams.push(network);
-          hubSql += ` AND (network = $2 OR network ILIKE $2)`;
-        }
-        hubSql += ' ORDER BY created_at ASC LIMIT 1';
-        const hubRes = await pool.query(hubSql, hubParams);
-        if (hubRes.rows.length > 0) {
-          const claimed = hubRes.rows[0];
-          await pool.query(`
-            UPDATE wallet_hub_addresses
-            SET status = 'assigned',
-                user_id = $1,
-                assigned_to_email = $2,
-                assigned_to_name = $3,
-                assigned_at = NOW(),
-                updated_at = NOW()
-            WHERE id = $4
-          `, [user.userId, user.email || '', (user.email || '').split('@')[0], claimed.id]);
 
-          const udaId = crypto.randomUUID();
-          await pool.query(`
-            INSERT INTO user_deposit_addresses(id, user_id, asset, network, address, label, min_deposit, instructions, enabled)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)
-            ON CONFLICT (user_id, asset, network)
-            DO UPDATE SET address = EXCLUDED.address, label = EXCLUDED.label, updated_at = NOW()
-          `, [udaId, user.userId, claimed.asset, claimed.network, claimed.address, claimed.label || 'Assigned Dedicated Wallet', claimed.minDeposit || 0, claimed.instructions || '']);
-
-          await pool.query(`
-            INSERT INTO wallet_hub_audit_logs (
-              address_id, address, asset, network, action, user_id, user_email, details
-            ) VALUES ($1, $2, $3, $4, 'auto_assigned', $5, $6, $7)
-          `, [claimed.id, claimed.address, claimed.asset, claimed.network, user.userId, user.email || '', `Auto-assigned on-demand from Hub upon deposit view`]);
-
-          rows = [{
-            id: udaId,
-            asset: claimed.asset,
-            network: claimed.network,
-            address: claimed.address,
-            label: claimed.label || 'Assigned Dedicated Wallet',
-            minDeposit: claimed.minDeposit || 0,
-            instructions: claimed.instructions || '',
-            enabled: true
-          }];
-        }
-      } catch (hubErr) {
-        console.warn('Wallet Hub on-demand assignment note:', hubErr.message);
-      }
-    }
   }
 
   // 3. TIER 3: Fallback to Global / Default application address
@@ -1159,23 +1044,29 @@ app.get('/api/deposit-addresses/active', async (req, res) => {
 });
 
 app.post('/api/admin/deposit-addresses', requireAdmin, async (req, res) => {
-  const { asset, network, address, label = '', minDeposit = 0, instructions = '', enabled = true } = req.body || {};
-  if (!asset || !network || !address) return res.status(400).json({ error: 'asset, network and address are required' });
+  const { asset, network, address = '', label = '', minDeposit = 0, instructions = '', enabled = true } = req.body || {};
+  const cleanAddr = String(address || '').trim();
+  const cleanInst = String(instructions || '').trim();
+  if (!asset || !network) return res.status(400).json({ error: 'Asset and network are required' });
+  if (!cleanAddr && !cleanInst) return res.status(400).json({ error: 'Either a wallet address or a note/instruction is required' });
   const id = crypto.randomUUID();
   try {
-    const { rows } = await pool.query(`INSERT INTO deposit_addresses(id,asset,network,address,label,min_deposit,instructions,enabled) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`, [id, String(asset).toUpperCase(), network, address.trim(), label, Number(minDeposit) || 0, instructions, Boolean(enabled)]);
+    const { rows } = await pool.query(`INSERT INTO deposit_addresses(id,asset,network,address,label,min_deposit,instructions,enabled) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`, [id, String(asset).toUpperCase(), network, cleanAddr, label, Number(minDeposit) || 0, cleanInst, Boolean(enabled)]);
     await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)', [req.admin.adminId, 'create', 'deposit_address', id, JSON.stringify({ asset, network, label, enabled })]);
     res.status(201).json({ address: rows[0] });
-  } catch (e) { if (e.code === '23505') return res.status(409).json({ error: 'An address already exists for this asset/network.' }); console.error(e); res.status(500).json({ error: 'Unable to create address' }); }
+  } catch (e) { if (e.code === '23505') return res.status(409).json({ error: 'An address or note configuration already exists for this asset/network.' }); console.error(e); res.status(500).json({ error: 'Unable to create address' }); }
 });
 
 app.put('/api/admin/deposit-addresses/:id', requireAdmin, async (req, res) => {
-  const { asset, network, address, label = '', minDeposit = 0, instructions = '', enabled = true } = req.body || {};
+  const { asset, network, address = '', label = '', minDeposit = 0, instructions = '', enabled = true } = req.body || {};
+  const cleanAddr = String(address || '').trim();
+  const cleanInst = String(instructions || '').trim();
+  if (!cleanAddr && !cleanInst) return res.status(400).json({ error: 'Either a wallet address or a note/instruction is required' });
   try {
     const old = await pool.query('SELECT * FROM deposit_addresses WHERE id=$1', [req.params.id]);
     if (!old.rowCount) return res.status(404).json({ error: 'Address not found' });
-    const { rows } = await pool.query(`UPDATE deposit_addresses SET asset=$1,network=$2,address=$3,label=$4,min_deposit=$5,instructions=$6,enabled=$7,updated_at=NOW() WHERE id=$8 RETURNING *`, [String(asset).toUpperCase(), network, address.trim(), label, Number(minDeposit) || 0, instructions, Boolean(enabled), req.params.id]);
-    await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)', [req.admin.adminId, 'update', 'deposit_address', req.params.id, JSON.stringify({ previous: { asset: old.rows[0].asset, network: old.rows[0].network, address: old.rows[0].address, enabled: old.rows[0].enabled }, next: { asset, network, address, enabled } })]);
+    const { rows } = await pool.query(`UPDATE deposit_addresses SET asset=$1,network=$2,address=$3,label=$4,min_deposit=$5,instructions=$6,enabled=$7,updated_at=NOW() WHERE id=$8 RETURNING *`, [String(asset).toUpperCase(), network, cleanAddr, label, Number(minDeposit) || 0, cleanInst, Boolean(enabled), req.params.id]);
+    await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)', [req.admin.adminId, 'update', 'deposit_address', req.params.id, JSON.stringify({ previous: { asset: old.rows[0].asset, network: old.rows[0].network, address: old.rows[0].address, enabled: old.rows[0].enabled }, next: { asset, network, address: cleanAddr, enabled } })]);
     res.json({ address: rows[0] });
   } catch (e) { console.error(e); res.status(500).json({ error: 'Unable to update address' }); }
 });
@@ -1951,16 +1842,22 @@ app.get('/api/admin/users/:userId/deposit-addresses', requireAdmin, async (req,r
   res.json({user:user.rows[0],addresses:rows});
 });
 app.post('/api/admin/users/:userId/deposit-addresses', requireAdmin, async (req,res)=>{
-  const {asset,network,address,label='',minDeposit=0,instructions='',enabled=true}=req.body||{};
-  if(!asset||!network||!address) return res.status(400).json({error:'asset, network and address are required.'});
+  const {asset,network,address='',label='',minDeposit=0,instructions='',enabled=true}=req.body||{};
+  const cleanAddr = String(address || '').trim();
+  const cleanInst = String(instructions || '').trim();
+  if(!asset||!network) return res.status(400).json({error:'asset and network are required.'});
+  if(!cleanAddr && !cleanInst) return res.status(400).json({error:'Either a wallet address or a note/instruction is required.'});
   const user=await pool.query('SELECT id,email FROM users WHERE id=$1',[req.params.userId]); if(!user.rowCount) return res.status(404).json({error:'User not found.'});
   const id=crypto.randomUUID();
-  try { const {rows}=await pool.query(`INSERT INTO user_deposit_addresses(id,user_id,asset,network,address,label,min_deposit,instructions,enabled) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id,user_id AS "userId",asset,network,address,label,min_deposit AS "minDeposit",instructions,enabled`,[id,req.params.userId,String(asset).toUpperCase(),String(network).trim(),String(address).trim(),label,Number(minDeposit)||0,instructions,Boolean(enabled)]); await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)',[req.admin.adminId,'create','user_deposit_address',id,JSON.stringify({userId:req.params.userId,userEmail:user.rows[0].email,asset,network})]); res.status(201).json({address:rows[0]}); }
+  try { const {rows}=await pool.query(`INSERT INTO user_deposit_addresses(id,user_id,asset,network,address,label,min_deposit,instructions,enabled) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id,user_id AS "userId",asset,network,address,label,min_deposit AS "minDeposit",instructions,enabled`,[id,req.params.userId,String(asset).toUpperCase(),String(network).trim(),cleanAddr,label,Number(minDeposit)||0,cleanInst,Boolean(enabled)]); await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)',[req.admin.adminId,'create','user_deposit_address',id,JSON.stringify({userId:req.params.userId,userEmail:user.rows[0].email,asset,network})]); res.status(201).json({address:rows[0]}); }
   catch(e){if(e.code==='23505')return res.status(409).json({error:'This user already has an address for that asset/network.'});console.error(e);res.status(500).json({error:'Unable to create user deposit address.'});}
 });
 app.put('/api/admin/users/:userId/deposit-addresses/:id', requireAdmin, async (req,res)=>{
-  const {asset,network,address,label='',minDeposit=0,instructions='',enabled=true}=req.body||{};
-  try { const old=await pool.query('SELECT * FROM user_deposit_addresses WHERE id=$1 AND user_id=$2',[req.params.id,req.params.userId]); if(!old.rowCount)return res.status(404).json({error:'User deposit address not found.'}); const {rows}=await pool.query(`UPDATE user_deposit_addresses SET asset=$1,network=$2,address=$3,label=$4,min_deposit=$5,instructions=$6,enabled=$7,updated_at=NOW() WHERE id=$8 AND user_id=$9 RETURNING id,user_id AS "userId",asset,network,address,label,min_deposit AS "minDeposit",instructions,enabled`,[String(asset).toUpperCase(),String(network).trim(),String(address).trim(),label,Number(minDeposit)||0,instructions,Boolean(enabled),req.params.id,req.params.userId]); await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)',[req.admin.adminId,'update','user_deposit_address',req.params.id,JSON.stringify({userId:req.params.userId,previous:old.rows[0],next:rows[0]})]); res.json({address:rows[0]}); } catch(e){if(e.code==='23505')return res.status(409).json({error:'This user already has an address for that asset/network.'});console.error(e);res.status(500).json({error:'Unable to update user deposit address.'});}
+  const {asset,network,address='',label='',minDeposit=0,instructions='',enabled=true}=req.body||{};
+  const cleanAddr = String(address || '').trim();
+  const cleanInst = String(instructions || '').trim();
+  if(!cleanAddr && !cleanInst) return res.status(400).json({error:'Either a wallet address or a note/instruction is required.'});
+  try { const old=await pool.query('SELECT * FROM user_deposit_addresses WHERE id=$1 AND user_id=$2',[req.params.id,req.params.userId]); if(!old.rowCount)return res.status(404).json({error:'User deposit address not found.'}); const {rows}=await pool.query(`UPDATE user_deposit_addresses SET asset=$1,network=$2,address=$3,label=$4,min_deposit=$5,instructions=$6,enabled=$7,updated_at=NOW() WHERE id=$8 AND user_id=$9 RETURNING id,user_id AS "userId",asset,network,address,label,min_deposit AS "minDeposit",instructions,enabled`,[String(asset).toUpperCase(),String(network).trim(),cleanAddr,label,Number(minDeposit)||0,cleanInst,Boolean(enabled),req.params.id,req.params.userId]); await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)',[req.admin.adminId,'update','user_deposit_address',req.params.id,JSON.stringify({userId:req.params.userId,previous:old.rows[0],next:rows[0]})]); res.json({address:rows[0]}); } catch(e){if(e.code==='23505')return res.status(409).json({error:'This user already has an address for that asset/network.'});console.error(e);res.status(500).json({error:'Unable to update user deposit address.'});}
 });
 app.delete('/api/admin/users/:userId/deposit-addresses/:id', requireAdmin, async (req,res)=>{try{const old=await pool.query('SELECT id,asset,network FROM user_deposit_addresses WHERE id=$1 AND user_id=$2',[req.params.id,req.params.userId]);if(!old.rowCount)return res.status(404).json({error:'User deposit address not found.'});await pool.query('DELETE FROM user_deposit_addresses WHERE id=$1 AND user_id=$2',[req.params.id,req.params.userId]);await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)',[req.admin.adminId,'delete','user_deposit_address',req.params.id,JSON.stringify({userId:req.params.userId,asset:old.rows[0].asset,network:old.rows[0].network})]);res.status(204).end()}catch(e){console.error(e);res.status(500).json({error:'Unable to delete user deposit address.'})}});
 
@@ -2246,26 +2143,10 @@ app.post('/api/admin/wallet-hub/batch-import', requireAdmin, async (req, res) =>
         const clean = String(a || '').trim();
         if (clean) toInsert.push(clean);
       }
-    } else if (generateCount > 0) {
-      const count = Math.min(parseInt(generateCount), 100);
-      for (let i = 0; i < count; i++) {
-        let addr = '';
-        if (network.includes('TRC') || network.includes('Tron')) {
-          addr = 'T' + crypto.randomBytes(16).toString('hex').slice(0, 33);
-        } else if (network.includes('NEAR')) {
-          addr = `kroma-vault-${crypto.randomBytes(4).toString('hex')}.near`;
-        } else if (network.includes('Solana')) {
-          const b58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-          addr = Array.from(crypto.randomBytes(42)).map(b => b58[b % b58.length]).join('');
-        } else if (network.includes('Bitcoin') || network.includes('SegWit')) {
-          addr = 'bc1q' + crypto.randomBytes(19).toString('hex');
-        } else {
-          addr = '0x' + crypto.randomBytes(20).toString('hex');
-        }
-        toInsert.push(addr);
-      }
-    } else {
-      return res.status(400).json({ error: 'Provide a list of addresses or a generateCount' });
+    }
+
+    if (toInsert.length === 0) {
+      return res.status(400).json({ error: 'Please provide a list of addresses to import.' });
     }
 
     let inserted = 0;

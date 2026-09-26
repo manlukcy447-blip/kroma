@@ -78,7 +78,8 @@ export const DepositModal: React.FC = () => {
 
   if (!depositModalOpen) return null;
 
-  const displayAddress = serverAddress?.address || (currentNetwork as any).depositAddress || '';
+  const displayAddress = (serverAddress?.address || (currentNetwork as any).depositAddress || '').trim();
+  const displayInstructions = (serverAddress?.instructions || '').trim();
   const displayNetwork = serverAddress?.network || currentNetwork.name || currentNetwork.shortName;
   const minDepositLimit = serverAddress?.minDeposit ?? (selectedSymbol === 'BTC' ? 0.0001 : selectedSymbol === 'ETH' ? 0.005 : 10);
 
@@ -228,20 +229,27 @@ export const DepositModal: React.FC = () => {
             </div>
 
             <div className="flex flex-col sm:flex-row items-center gap-4 bg-slate-950/70 p-4 rounded-xl border border-slate-800">
-              {/* Real Live Dynamic QR Code */}
+              {/* Real Live Dynamic QR Code or Placeholder if empty */}
               <div className="p-2 bg-white rounded-xl shadow-lg shrink-0 flex items-center justify-center">
-                <LiveQRCode 
-                  value={displayAddress || `${selectedSymbol}:${displayNetwork}`} 
-                  size={120} 
-                  alt={`${selectedSymbol} receiving address live QR code`}
-                />
+                {displayAddress ? (
+                  <LiveQRCode 
+                    value={displayAddress} 
+                    size={120} 
+                    alt={`${selectedSymbol} receiving address live QR code`}
+                  />
+                ) : (
+                  <div className="w-[120px] h-[120px] bg-slate-900 border border-slate-800 rounded-lg flex flex-col items-center justify-center text-slate-500">
+                    <QrCode className="w-8 h-8 text-slate-600 mb-1" />
+                    <span className="text-[10px] text-slate-500 font-mono">No Address</span>
+                  </div>
+                )}
               </div>
 
               {/* Address string & Copy Button */}
               <div className="flex-1 min-w-0 w-full space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-semibold text-slate-400">
-                    Vault Address ({currentAsset.symbol})
+                    {displayAddress ? `Vault Address (${currentAsset.symbol})` : (displayInstructions ? 'Deposit Note' : `Vault Address (${currentAsset.symbol})`)}
                   </span>
                   {serverAddress?.label && (
                     <span className="text-[10px] text-slate-400 font-mono">
@@ -250,20 +258,30 @@ export const DepositModal: React.FC = () => {
                   )}
                 </div>
 
-                <div className="p-3 rounded-xl bg-slate-900 border border-slate-700/80 font-mono text-xs text-cyan-300 break-all select-all flex items-center justify-between gap-3 shadow-inner">
+                <div className="p-3 rounded-xl bg-slate-900 border border-slate-700/80 font-mono text-xs text-cyan-300 break-all select-all flex items-center justify-between gap-3 shadow-inner min-h-[46px]">
                   <span className="leading-relaxed">
-                    {addressLoading ? 'Generating secure address…' : (displayAddress || 'Contact admin to assign receiving vault')}
+                    {addressLoading ? 'Loading…' : (displayAddress || displayInstructions || '')}
                   </span>
-                  <button
-                    type="button"
-                    id="btn-copy-receive-address"
-                    onClick={handleCopy}
-                    className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white shrink-0 transition-colors cursor-pointer active:scale-95 border border-slate-700 shadow"
-                    title="Copy receiving address"
-                  >
-                    {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-                  </button>
+                  {displayAddress ? (
+                    <button
+                      type="button"
+                      id="btn-copy-receive-address"
+                      onClick={handleCopy}
+                      className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white shrink-0 transition-colors cursor-pointer active:scale-95 border border-slate-700 shadow"
+                      title="Copy receiving address"
+                    >
+                      {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                    </button>
+                  ) : null}
                 </div>
+
+                {/* If there is BOTH an address and an admin note/instructions, display the note card below */}
+                {displayAddress && displayInstructions && (
+                  <div className="p-2.5 rounded-xl bg-cyan-950/40 border border-cyan-800/40 text-xs text-cyan-200">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-400 block mb-0.5">Admin Note:</span>
+                    <p className="text-[11px] leading-relaxed text-cyan-100">{displayInstructions}</p>
+                  </div>
+                )}
 
                 <div className="flex items-center justify-between text-[11px]">
                   <span className="text-slate-400">
