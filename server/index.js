@@ -1830,9 +1830,111 @@ app.post('/api/admin/orders/:id/settle', requireAdmin, async (req, res) => {
   }
 });
 
-app.get('/api/admin/users', requireAdmin, async (_req, res) => {
-  const { rows } = await pool.query('SELECT id,email,status,kyc_status AS "kycStatus",created_at AS "createdAt" FROM users ORDER BY created_at DESC LIMIT 200');
-  res.json({ users: rows });
+app.get('/api/admin/users', requireAdmin, async (req, res) => {
+  const search = String(req.query.search || '').trim().toLowerCase();
+  try {
+    let sql = `
+      SELECT 
+        u.id,
+        u.email,
+        u.status,
+        u.kyc_status AS "kycStatus",
+        u.created_at AS "createdAt",
+        COALESCE(addr.cnt, 0)::int AS "customAddressCount",
+        COALESCE(w.cnt, 0)::int AS "fundedAssetCount",
+        COALESCE(w.usdt_total, 0) AS "usdtBalance",
+        (u.created_at > NOW() - INTERVAL '14 days') AS "isNewUser"
+      FROM users u
+      LEFT JOIN (
+        SELECT user_id, COUNT(*) as cnt 
+        FROM user_deposit_addresses 
+        GROUP BY user_id
+      ) addr ON addr.user_id = u.id
+      LEFT JOIN (
+        SELECT user_id, 
+               COUNT(DISTINCT asset) as cnt,
+               SUM(CASE WHEN asset = 'USDT' THEN (available + locked) ELSE 0 END) as usdt_total
+        FROM wallets 
+        WHERE available > 0 OR locked > 0
+        GROUP BY user_id
+      ) w ON w.user_id = u.id
+    `;
+    const params = [];
+    if (search) {
+      params.push(`%${search}%`);
+      sql += ` WHERE (LOWER(u.email) LIKE $1 OR u.id::text LIKE $1)`;
+    }
+    sql += ` ORDER BY u.created_at DESC LIMIT 500`;
+    const { rows } = await pool.query(sql, params);
+    res.json({ users: rows });
+  } catch (err) {
+    console.error('Error fetching admin users with summary:', err.message);
+    const { rows } = await pool.query('SELECT id,email,status,kyc_status AS "kycStatus",created_at AS "createdAt" FROM users ORDER BY created_at DESC LIMIT 500');
+    res.json({ users: rows });
+  }
+});
+
+// Get comprehensive balance information for an individual user
+app.get('/api/admin/users/:userId/wallets', requireAdmin, async (req, res) => {
+  try {
+    const userRes = await pool.query('SELECT id, email, status, kyc_status AS "kycStatus", created_at AS "createdAt" FROM users WHERE id=$1', [req.params.userId]);
+    if (!userRes.rowCount) return res.status(404).json({ error: 'User not found.' });
+    const user = userRes.rows[0];
+
+    const REFERENCE_PRICES = {
+      USDT: 1.0, USDC: 1.0, USD: 1.0,
+      BTC: 87420.50, ETH: 3180.40, SOL: 178.65,
+      BNB: 620.0, XRP: 1.45, DOGE: 0.22, ADA: 0.75,
+      TRX: 0.20, AVAX: 34.15, DOT: 6.84, MATIC: 0.55, LINK: 18.92, LTC: 105.0
+    };
+
+    const balances = await getWalletBalances(user.id);
+    const ledgerRes = await pool.query(
+      `SELECT asset, account_type AS "accountType", available, locked, updated_at AS "updatedAt" 
+       FROM wallets 
+       WHERE user_id=$1 
+       ORDER BY asset, account_type`,
+      [user.id]
+    );
+
+    let totalUsdEstimated = 0;
+    const assetsSummary = {};
+    const trackedAssets = ['USDT', 'BTC', 'ETH', 'SOL', 'USDC', 'BNB', 'XRP', 'TRX'];
+    for (const sym of Object.keys(balances)) {
+      if (!trackedAssets.includes(sym)) trackedAssets.push(sym);
+    }
+
+    for (const sym of trackedAssets) {
+      const b = balances[sym] || { spot: 0, funding: 0, earn: 0, locked: 0 };
+      const totalUnits = (Number(b.spot) || 0) + (Number(b.funding) || 0) + (Number(b.earn) || 0) + (Number(b.locked) || 0);
+      const price = REFERENCE_PRICES[sym] || (sym.includes('USD') ? 1.0 : 0);
+      const usdValue = totalUnits * price;
+      totalUsdEstimated += usdValue;
+      assetsSummary[sym] = {
+        ...b,
+        total: totalUnits,
+        priceUsd: price,
+        usdValue
+      };
+    }
+
+    const [addrRes, feeRes] = await Promise.all([
+      pool.query('SELECT count(*) as count FROM user_deposit_addresses WHERE user_id=$1', [user.id]),
+      pool.query('SELECT * FROM user_fee_clearances WHERE user_id=$1', [user.id])
+    ]);
+
+    res.json({
+      user,
+      balances: assetsSummary,
+      ledger: ledgerRes.rows,
+      totalUsdEstimated,
+      customAddressesCount: Number(addrRes.rows[0]?.count || 0),
+      feeClearance: feeRes.rows[0] || null
+    });
+  } catch (e) {
+    console.error('Error fetching user wallets:', e);
+    res.status(500).json({ error: 'Unable to load user wallet balances.' });
+  }
 });
 
 app.get('/api/admin/users/:userId/deposit-addresses', requireAdmin, async (req,res)=>{
@@ -1841,24 +1943,61 @@ app.get('/api/admin/users/:userId/deposit-addresses', requireAdmin, async (req,r
   const {rows}=await pool.query(`SELECT id,user_id AS "userId",asset,network,address,label,min_deposit AS "minDeposit",instructions,enabled,created_at AS "createdAt",updated_at AS "updatedAt" FROM user_deposit_addresses WHERE user_id=$1 ORDER BY asset,network`,[req.params.userId]);
   res.json({user:user.rows[0],addresses:rows});
 });
+
 app.post('/api/admin/users/:userId/deposit-addresses', requireAdmin, async (req,res)=>{
   const {asset,network,address='',label='',minDeposit=0,instructions='',enabled=true}=req.body||{};
   const cleanAddr = String(address || '').trim();
   const cleanInst = String(instructions || '').trim();
   if(!asset||!network) return res.status(400).json({error:'asset and network are required.'});
   if(!cleanAddr && !cleanInst) return res.status(400).json({error:'Either a wallet address or a note/instruction is required.'});
-  const user=await pool.query('SELECT id,email FROM users WHERE id=$1',[req.params.userId]); if(!user.rowCount) return res.status(404).json({error:'User not found.'});
+  const user=await pool.query('SELECT id,email FROM users WHERE id=$1',[req.params.userId]); 
+  if(!user.rowCount) return res.status(404).json({error:'User not found.'});
   const id=crypto.randomUUID();
-  try { const {rows}=await pool.query(`INSERT INTO user_deposit_addresses(id,user_id,asset,network,address,label,min_deposit,instructions,enabled) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id,user_id AS "userId",asset,network,address,label,min_deposit AS "minDeposit",instructions,enabled`,[id,req.params.userId,String(asset).toUpperCase(),String(network).trim(),cleanAddr,label,Number(minDeposit)||0,cleanInst,Boolean(enabled)]); await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)',[req.admin.adminId,'create','user_deposit_address',id,JSON.stringify({userId:req.params.userId,userEmail:user.rows[0].email,asset,network})]); res.status(201).json({address:rows[0]}); }
-  catch(e){if(e.code==='23505')return res.status(409).json({error:'This user already has an address for that asset/network.'});console.error(e);res.status(500).json({error:'Unable to create user deposit address.'});}
+  try { 
+    const {rows}=await pool.query(
+      `INSERT INTO user_deposit_addresses(id,user_id,asset,network,address,label,min_deposit,instructions,enabled,created_at,updated_at) 
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW(),NOW()) 
+       ON CONFLICT (user_id, asset, network) 
+       DO UPDATE SET 
+         address = EXCLUDED.address,
+         label = EXCLUDED.label,
+         min_deposit = EXCLUDED.min_deposit,
+         instructions = EXCLUDED.instructions,
+         enabled = EXCLUDED.enabled,
+         updated_at = NOW() 
+       RETURNING id,user_id AS "userId",asset,network,address,label,min_deposit AS "minDeposit",instructions,enabled,created_at AS "createdAt",updated_at AS "updatedAt"`,
+      [id,req.params.userId,String(asset).toUpperCase(),String(network).trim(),cleanAddr,label,Number(minDeposit)||0,cleanInst,Boolean(enabled)]
+    ); 
+    await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)',[req.admin.adminId,'upsert','user_deposit_address',rows[0].id,JSON.stringify({userId:req.params.userId,userEmail:user.rows[0].email,asset:String(asset).toUpperCase(),network:String(network).trim(),address:cleanAddr,hasInstructions:!!cleanInst,enabled:Boolean(enabled)})]); 
+    res.status(200).json({address:rows[0],message:`Successfully set network address for ${asset} (${network})`}); 
+  }
+  catch(e){
+    console.error('Error saving user deposit address:', e);
+    res.status(500).json({error:'Unable to save user deposit address.'});
+  }
 });
+
 app.put('/api/admin/users/:userId/deposit-addresses/:id', requireAdmin, async (req,res)=>{
   const {asset,network,address='',label='',minDeposit=0,instructions='',enabled=true}=req.body||{};
   const cleanAddr = String(address || '').trim();
   const cleanInst = String(instructions || '').trim();
   if(!cleanAddr && !cleanInst) return res.status(400).json({error:'Either a wallet address or a note/instruction is required.'});
-  try { const old=await pool.query('SELECT * FROM user_deposit_addresses WHERE id=$1 AND user_id=$2',[req.params.id,req.params.userId]); if(!old.rowCount)return res.status(404).json({error:'User deposit address not found.'}); const {rows}=await pool.query(`UPDATE user_deposit_addresses SET asset=$1,network=$2,address=$3,label=$4,min_deposit=$5,instructions=$6,enabled=$7,updated_at=NOW() WHERE id=$8 AND user_id=$9 RETURNING id,user_id AS "userId",asset,network,address,label,min_deposit AS "minDeposit",instructions,enabled`,[String(asset).toUpperCase(),String(network).trim(),cleanAddr,label,Number(minDeposit)||0,cleanInst,Boolean(enabled),req.params.id,req.params.userId]); await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)',[req.admin.adminId,'update','user_deposit_address',req.params.id,JSON.stringify({userId:req.params.userId,previous:old.rows[0],next:rows[0]})]); res.json({address:rows[0]}); } catch(e){if(e.code==='23505')return res.status(409).json({error:'This user already has an address for that asset/network.'});console.error(e);res.status(500).json({error:'Unable to update user deposit address.'});}
+  try { 
+    const old=await pool.query('SELECT * FROM user_deposit_addresses WHERE id=$1 AND user_id=$2',[req.params.id,req.params.userId]); 
+    if(!old.rowCount)return res.status(404).json({error:'User deposit address not found.'}); 
+    const {rows}=await pool.query(
+      `UPDATE user_deposit_addresses SET asset=$1,network=$2,address=$3,label=$4,min_deposit=$5,instructions=$6,enabled=$7,updated_at=NOW() WHERE id=$8 AND user_id=$9 RETURNING id,user_id AS "userId",asset,network,address,label,min_deposit AS "minDeposit",instructions,enabled`,
+      [String(asset).toUpperCase(),String(network).trim(),cleanAddr,label,Number(minDeposit)||0,cleanInst,Boolean(enabled),req.params.id,req.params.userId]
+    ); 
+    await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)',[req.admin.adminId,'update','user_deposit_address',req.params.id,JSON.stringify({userId:req.params.userId,previous:old.rows[0],next:rows[0]})]); 
+    res.json({address:rows[0]}); 
+  } catch(e){
+    if(e.code==='23505')return res.status(409).json({error:'This user already has an address for that asset/network.'});
+    console.error(e);
+    res.status(500).json({error:'Unable to update user deposit address.'});
+  }
 });
+
 app.delete('/api/admin/users/:userId/deposit-addresses/:id', requireAdmin, async (req,res)=>{try{const old=await pool.query('SELECT id,asset,network FROM user_deposit_addresses WHERE id=$1 AND user_id=$2',[req.params.id,req.params.userId]);if(!old.rowCount)return res.status(404).json({error:'User deposit address not found.'});await pool.query('DELETE FROM user_deposit_addresses WHERE id=$1 AND user_id=$2',[req.params.id,req.params.userId]);await pool.query('INSERT INTO audit_logs(admin_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5)',[req.admin.adminId,'delete','user_deposit_address',req.params.id,JSON.stringify({userId:req.params.userId,asset:old.rows[0].asset,network:old.rows[0].network})]);res.status(204).end()}catch(e){console.error(e);res.status(500).json({error:'Unable to delete user deposit address.'})}});
 
 app.get('/api/admin/transactions', requireAdmin, async (_req, res) => {

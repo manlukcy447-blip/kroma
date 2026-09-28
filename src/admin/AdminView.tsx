@@ -7,6 +7,7 @@ import { AdminEarnYieldControl } from './AdminEarnYieldControl';
 import { AdminRewardsControl } from './AdminRewardsControl';
 import { AdminTradingControl } from './AdminTradingControl';
 import { AdminWalletAddressHub } from './AdminWalletAddressHub';
+import { AdminUserWalletsAddresses } from './AdminUserWalletsAddresses';
 import { 
   ShieldCheck, 
   KeyRound, 
@@ -58,7 +59,7 @@ export const AdminView: React.FC = () => {
   const [error, setError] = useState('');
   
   // Navigation Tabs
-  const [activeTab, setActiveTab] = useState<'overview' | 'features' | 'earn' | 'rewards' | 'trade' | 'wallets' | 'notifications' | 'audit' | 'wallet_hub'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'features' | 'earn' | 'rewards' | 'trade' | 'wallets' | 'notifications' | 'audit' | 'wallet_hub' | 'user_addresses'>('overview');
 
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [features, setFeatures] = useState<Feature[]>([]);
@@ -84,9 +85,6 @@ export const AdminView: React.FC = () => {
   const [recoveryMsg, setRecoveryMsg] = useState('');
   
   const [selectedUserId, setSelectedUserId] = useState('');
-  const [userAddresses, setUserAddresses] = useState<any[]>([]);
-  const [userAddrForm, setUserAddrForm] = useState({ asset: 'USDT', network: 'TRC20', address: '', label: '', minDeposit: '0', instructions: '', enabled: true });
-  const [editingUserAddr, setEditingUserAddr] = useState<any | null>(null);
 
   const load = async () => {
     try {
@@ -133,44 +131,6 @@ export const AdminView: React.FC = () => {
   useEffect(() => {
     if (loggedIn) load();
   }, [loggedIn]);
-
-  const loadUserAddresses = async (id: string) => {
-    setSelectedUserId(id);
-    setUserAddresses([]);
-    if (!id) return;
-    try {
-      const r = await apiFetch<any>(`/api/admin/users/${id}/deposit-addresses`);
-      setUserAddresses(r.addresses || []);
-    } catch (e: any) {
-      setError(e.message);
-    }
-  };
-
-  const saveUserAddress = async () => {
-    try {
-      const body = { ...userAddrForm, minDeposit: Number(userAddrForm.minDeposit) || 0 };
-      if (editingUserAddr) {
-        await apiFetch(`/api/admin/users/${selectedUserId}/deposit-addresses/${editingUserAddr.id}`, { method: 'PUT', body: JSON.stringify(body) });
-      } else {
-        await apiFetch(`/api/admin/users/${selectedUserId}/deposit-addresses`, { method: 'POST', body: JSON.stringify(body) });
-      }
-      setEditingUserAddr(null);
-      setUserAddrForm({ asset: 'USDT', network: 'TRC20', address: '', label: '', minDeposit: '0', instructions: '', enabled: true });
-      await loadUserAddresses(selectedUserId);
-    } catch (e: any) {
-      setError(e.message);
-    }
-  };
-
-  const removeUserAddress = async (id: string) => {
-    if (!confirm('Delete this user-specific deposit address?')) return;
-    try {
-      await apiFetch(`/api/admin/users/${selectedUserId}/deposit-addresses/${id}`, { method: 'DELETE' });
-      await loadUserAddresses(selectedUserId);
-    } catch (e: any) {
-      setError(e.message);
-    }
-  };
 
   const login = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -434,6 +394,24 @@ export const AdminView: React.FC = () => {
               activeTab === 'wallet_hub' ? 'bg-slate-950 text-cyan-400' : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
             }`}>
               Dedicated Hub
+            </span>
+          </button>
+
+          <button
+            id="tab-btn-admin-user-addresses"
+            onClick={() => setActiveTab('user_addresses')}
+            className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+              activeTab === 'user_addresses'
+                ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            <span>USER BALANCES & ADDRESSES</span>
+            <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
+              activeTab === 'user_addresses' ? 'bg-slate-950 text-cyan-400' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+            }`}>
+              Individual
             </span>
           </button>
 
@@ -750,6 +728,15 @@ export const AdminView: React.FC = () => {
           <AdminWalletAddressHub users={users} onRefreshParent={load} />
         )}
 
+        {/* TAB: USER BALANCES & NETWORK ADDRESSES */}
+        {activeTab === 'user_addresses' && (
+          <AdminUserWalletsAddresses 
+            users={users as any} 
+            onRefreshParent={load} 
+            initialUserId={selectedUserId} 
+          />
+        )}
+
         {/* TAB 6: WALLETS & ADDRESSES */}
         {activeTab === 'wallets' && (
           <div className="space-y-6">
@@ -842,77 +829,12 @@ export const AdminView: React.FC = () => {
               </div>
             </section>
 
-            {/* Individual User Specific Deposit Addresses */}
-            <section className="bg-[#111622] border border-slate-800 rounded-2xl p-5">
-              <div className="flex items-center gap-2 mb-4">
-                <Users className="text-cyan-400" />
-                <div>
-                  <h2 className="font-bold text-lg text-white">Individual User Deposit Addresses</h2>
-                  <p className="text-xs text-slate-400">Assign a custom receiving address to a specific user account.</p>
-                </div>
-              </div>
-
-              <select value={selectedUserId} onChange={e => loadUserAddresses(e.target.value)} className="input mb-4">
-                <option value="">Select a user account...</option>
-                {users.map(u => <option key={u.id} value={u.id}>{u.email}</option>)}
-              </select>
-
-              {selectedUserId && (
-                <>
-                  <div className="grid md:grid-cols-2 gap-3 p-4 rounded-xl bg-slate-900 border border-slate-800 mb-4">
-                    <Field label="Asset"><input value={userAddrForm.asset} onChange={e => setUserAddrForm({ ...userAddrForm, asset: e.target.value })} className="input" /></Field>
-                    <Field label="Network"><input value={userAddrForm.network} onChange={e => setUserAddrForm({ ...userAddrForm, network: e.target.value })} className="input" /></Field>
-                    <Field label="Receiving Address (Optional if Note provided)"><input value={userAddrForm.address} onChange={e => setUserAddrForm({ ...userAddrForm, address: e.target.value })} className="input" placeholder="e.g. bc1q... or 0x... (leave empty if replacing with note)" /></Field>
-                    <Field label="Label"><input value={userAddrForm.label} onChange={e => setUserAddrForm({ ...userAddrForm, label: e.target.value })} className="input" placeholder="e.g. Dedicated User Wallet" /></Field>
-                    <Field label="Minimum Deposit"><input type="number" min="0" value={userAddrForm.minDeposit} onChange={e => setUserAddrForm({ ...userAddrForm, minDeposit: e.target.value })} className="input" /></Field>
-                    <Field label="Deposit Note / Instructions (Can replace address)"><input value={userAddrForm.instructions} onChange={e => setUserAddrForm({ ...userAddrForm, instructions: e.target.value })} className="input" placeholder="e.g. Custom note or instructions for this user" /></Field>
-                    <label className="text-sm flex items-center gap-2"><input type="checkbox" checked={userAddrForm.enabled} onChange={e => setUserAddrForm({ ...userAddrForm, enabled: e.target.checked })} /> Active</label>
-                    <div>
-                      <button onClick={saveUserAddress} className="px-4 py-2 rounded-lg bg-emerald-400 text-slate-950 font-bold text-xs">
-                        {editingUserAddr ? 'Save Configuration' : 'Add User Address / Note'}
-                      </button>
-                      {editingUserAddr && (
-                        <button onClick={() => { setEditingUserAddr(null); setUserAddrForm({ asset: 'USDT', network: 'TRC20', address: '', label: '', minDeposit: '0', instructions: '', enabled: true }); }} className="ml-2 px-4 py-2 rounded-lg bg-slate-800 text-xs">
-                          Cancel
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="hidden sm:block overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="text-slate-400 border-b border-slate-800">
-                          <th className="text-left p-3">Asset</th>
-                          <th className="text-left p-3">Network</th>
-                          <th className="text-left p-3">Address</th>
-                          <th className="text-left p-3">Status</th>
-                          <th className="p-3">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {userAddresses.map(a => (
-                          <tr key={a.id} className="border-b border-slate-800/70">
-                            <td className="p-3 font-bold text-white">{a.asset}</td>
-                            <td className="p-3">{a.network}</td>
-                            <td className="p-3 font-mono text-xs break-all">{a.address}</td>
-                            <td className="p-3">{a.enabled ? <span className="text-emerald-400">Active</span> : <span className="text-red-400">Disabled</span>}</td>
-                            <td className="p-3 flex justify-end gap-2">
-                              <button onClick={() => { setEditingUserAddr(a); setUserAddrForm({ asset: a.asset, network: a.network, address: a.address, label: a.label || '', minDeposit: String(a.minDeposit), instructions: a.instructions || '', enabled: a.enabled }); }} className="p-2 bg-slate-800 rounded">
-                                <Pencil className="w-4 h-4" />
-                              </button>
-                              <button onClick={() => removeUserAddress(a.id)} className="p-2 bg-red-500/10 text-red-400 rounded">
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </>
-              )}
-            </section>
+            {/* Individual User Specific Deposit Addresses & Balances */}
+            <AdminUserWalletsAddresses 
+              users={users as any} 
+              onRefreshParent={load} 
+              initialUserId={selectedUserId} 
+            />
 
             {/* Wallet Ledger & Users */}
             <div className="grid lg:grid-cols-2 gap-6">
