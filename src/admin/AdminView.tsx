@@ -35,7 +35,8 @@ import {
   AlertCircle,
   Copy,
   Check,
-  Database
+  Database,
+  LogIn
 } from 'lucide-react';
 
 type Address = {
@@ -219,6 +220,31 @@ export const AdminView: React.FC = () => {
       } catch {}
     } catch (e: any) {
       setError(e.message);
+    }
+  };
+
+  const handleImpersonateUser = async (userId: string, targetEmail?: string) => {
+    if (!confirm(`Log in directly to ${targetEmail || 'this user'}'s account? You will be authenticated into their full exchange account to view their wallet balances, trading history, and deposit views live.`)) {
+      return;
+    }
+    try {
+      const res = await apiFetch<any>(`/api/admin/users/${userId}/impersonate`, {
+        method: 'POST'
+      });
+      if (res?.token && res?.user) {
+        localStorage.setItem('kroma_auth_token', res.token);
+        sessionStorage.setItem('kroma_impersonating', JSON.stringify({
+          userId: res.user.id,
+          userEmail: res.user.email,
+          adminEmail: res.impersonator?.adminEmail || 'admin@kroma.io',
+          startedAt: Date.now()
+        }));
+        window.location.href = '/';
+      } else {
+        throw new Error(res?.error || 'Authentication token missing from response');
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Failed to log into user account.');
     }
   };
 
@@ -839,7 +865,7 @@ export const AdminView: React.FC = () => {
             {/* Wallet Ledger & Users */}
             <div className="grid lg:grid-cols-2 gap-6">
               <Data title="Wallet Ledger Balances" rows={wallets} cols={['email', 'asset', 'accountType', 'available', 'locked']} />
-              <Data title="Registered Users" rows={users} cols={['email', 'status', 'kycStatus']} />
+              <Data title="Registered Users" rows={users} cols={['email', 'status', 'kycStatus']} onImpersonate={handleImpersonateUser} />
             </div>
           </div>
         )}
@@ -1134,7 +1160,7 @@ const Field = ({ label, children }: { label: string; children: React.ReactNode }
   </label>
 );
 
-const Data = ({ title, rows, cols }: { title: string; rows: any[]; cols: string[] }) => (
+const Data = ({ title, rows, cols, onImpersonate }: { title: string; rows: any[]; cols: string[]; onImpersonate?: (userId: string, email: string) => void }) => (
   <section className="bg-[#111622] border border-slate-800 rounded-2xl p-5">
     <h2 className="font-bold text-lg text-white mb-3">{title}</h2>
     {/* Mobile Cards (No horizontal drag) */}
@@ -1150,6 +1176,17 @@ const Data = ({ title, rows, cols }: { title: string; rows: any[]; cols: string[
                 <span className="font-mono text-slate-200 truncate max-w-[200px]">{String(r[c] ?? '—')}</span>
               </div>
             ))}
+            {onImpersonate && r.id && (
+              <div className="pt-1.5 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => onImpersonate(r.id, r.email)}
+                  className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500 hover:text-slate-950 text-amber-300 font-bold text-[11px] flex items-center gap-1 transition cursor-pointer"
+                >
+                  <LogIn className="w-3 h-3" /> Log In as User
+                </button>
+              </div>
+            )}
           </div>
         ))
       )}
@@ -1162,12 +1199,25 @@ const Data = ({ title, rows, cols }: { title: string; rows: any[]; cols: string[
             {cols.map(c => (
               <th key={c} className="p-2 capitalize">{c}</th>
             ))}
+            {onImpersonate && <th className="p-2 text-right">Actions</th>}
           </tr>
         </thead>
         <tbody>
           {rows.slice(0, 20).map((r, i) => (
             <tr key={r.id || i} className="border-b border-slate-800/70 hover:bg-slate-900/40">
               {cols.map(c => <td key={c} className="p-2 font-mono">{String(r[c] ?? '—')}</td>)}
+              {onImpersonate && (
+                <td className="p-2 text-right">
+                  <button
+                    type="button"
+                    onClick={() => onImpersonate(r.id, r.email)}
+                    className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500 hover:text-slate-950 text-amber-300 font-bold text-[11px] inline-flex items-center gap-1 transition cursor-pointer active:scale-95"
+                    title={`Log in to ${r.email}'s account`}
+                  >
+                    <LogIn className="w-3 h-3" /> Log In
+                  </button>
+                </td>
+              )}
             </tr>
           ))}
         </tbody>

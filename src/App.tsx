@@ -33,10 +33,45 @@ import { FeeClearanceModal } from './components/wallet/FeeClearanceModal';
 import { RegionRestrictedModal } from './components/common/RegionRestrictedModal';
 import { AdminView } from './admin/AdminView';
 import { AuthProvider, useAuth } from './auth';
-import { ShieldAlert, ArrowRight, Globe, Lock } from 'lucide-react';
+import { ShieldAlert, ArrowRight, Globe, Lock, LogOut } from 'lucide-react';
 import { LoginPage, SignupPage, ForgotPasswordPage, ResetPasswordPage } from './auth/AuthPages';
 import { PWAInstallModal } from './components/common/PWAInstallModal';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
+
+const ImpersonationBanner: React.FC = () => {
+  const { user, impersonation, exitImpersonation } = useAuth();
+  if (!impersonation || !user) return null;
+
+  return (
+    <div className="bg-gradient-to-r from-amber-600 via-amber-700 to-orange-700 text-white px-4 py-2 text-xs font-semibold flex flex-wrap items-center justify-between gap-2 shadow-2xl sticky top-0 z-[100] border-b border-amber-400/50 backdrop-blur-md">
+      <div className="flex items-center gap-2.5">
+        <span className="p-1 rounded-lg bg-black/40 text-amber-200 border border-amber-400/30">
+          <ShieldAlert className="w-4 h-4" />
+        </span>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="uppercase tracking-wider text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-950/80 text-amber-200 border border-amber-500/50">
+            ADMIN IMPERSONATION
+          </span>
+          <span className="text-amber-50">
+            Logged into: <strong className="text-white underline decoration-amber-300 font-mono">{user.email}</strong>
+          </span>
+          <span className="text-[11px] text-amber-200/80 font-mono hidden sm:inline">
+            (UID: {user.id})
+          </span>
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={exitImpersonation}
+          className="px-3 py-1.5 bg-black/70 hover:bg-black/95 text-amber-200 hover:text-white text-xs font-bold rounded-xl border border-amber-400/50 transition-all flex items-center gap-1.5 cursor-pointer shadow-lg active:scale-95"
+        >
+          <LogOut className="w-3.5 h-3.5 text-amber-400" />
+          <span>Exit & Return to Admin Panel</span>
+        </button>
+      </div>
+    </div>
+  );
+};
 
 const UnavailableView: React.FC<{label:string}> = ({label}) => {
   const { setCurrentTab } = useCrypto();
@@ -139,6 +174,8 @@ const AppContent: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#070A10] text-slate-100 flex flex-col selection:bg-cyan-500 selection:text-slate-900 pb-16 md:pb-0 overflow-x-hidden w-full max-w-full">
+      {/* Admin Impersonation Alert Banner */}
+      <ImpersonationBanner />
       {/* Top Main Navigation Bar */}
       <Header />
 

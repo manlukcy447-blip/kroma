@@ -26,7 +26,8 @@ import {
   ExternalLink,
   ChevronRight,
   Sliders,
-  Filter
+  Filter,
+  LogIn
 } from 'lucide-react';
 import { apiFetch } from './api';
 
@@ -379,6 +380,41 @@ export const AdminUserWalletsAddresses: React.FC<{
     }
   };
 
+  // Admin Impersonation: Log in directly into a user's account
+  const [impersonatingId, setImpersonatingId] = useState<string | null>(null);
+
+  const handleImpersonateUser = async (userId: string, email?: string) => {
+    if (!confirm(`Log in to ${email || 'this user'}'s account? You will be authenticated into their full exchange session to view and test their wallet, trades, and deposit addresses live.`)) {
+      return;
+    }
+    setImpersonatingId(userId);
+    setStatusMessage(null);
+    try {
+      const res = await apiFetch<any>(`/api/admin/users/${userId}/impersonate`, {
+        method: 'POST'
+      });
+      if (res?.token && res?.user) {
+        // Store user token
+        localStorage.setItem('kroma_auth_token', res.token);
+        // Record impersonation session data
+        sessionStorage.setItem('kroma_impersonating', JSON.stringify({
+          userId: res.user.id,
+          userEmail: res.user.email,
+          adminEmail: res.impersonator?.adminEmail || 'admin@kroma.io',
+          startedAt: Date.now()
+        }));
+        setStatusMessage({ type: 'success', text: `Successfully authenticated as ${res.user.email}! Redirecting to exchange…` });
+        // Redirect to main user exchange
+        window.location.href = '/';
+      } else {
+        throw new Error(res?.error || 'Authentication token missing from response');
+      }
+    } catch (err: any) {
+      setStatusMessage({ type: 'error', text: err?.message || 'Failed to log into user account.' });
+      setImpersonatingId(null);
+    }
+  };
+
   // Filtered users list
   const filteredUsers = useMemo(() => {
     let list = users;
@@ -553,16 +589,29 @@ export const AdminUserWalletsAddresses: React.FC<{
                       </div>
 
                       <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono">
-                        <span className="truncate max-w-[120px]">
+                        <span className="truncate max-w-[100px]">
                           ID: {u.id.slice(0, 8)}…
                         </span>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5">
                           {(u.customAddressCount ?? 0) > 0 && (
-                            <span className="text-cyan-400 font-bold" title="Custom addresses assigned">
+                            <span className="text-cyan-400 font-bold text-[9px]" title="Custom addresses assigned">
                               {u.customAddressCount} addr
                             </span>
                           )}
-                          <span className={`${u.status === 'active' ? 'text-emerald-400' : 'text-amber-400'}`}>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleImpersonateUser(u.id, u.email);
+                            }}
+                            disabled={impersonatingId === u.id}
+                            className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 hover:bg-amber-500 hover:text-slate-950 text-amber-300 border border-amber-500/30 transition flex items-center gap-1 cursor-pointer shrink-0"
+                            title="Log into user account"
+                          >
+                            <LogIn className="w-2.5 h-2.5" />
+                            {impersonatingId === u.id ? '…' : 'Log In'}
+                          </button>
+                          <span className={`text-[9px] ${u.status === 'active' ? 'text-emerald-400' : 'text-amber-400'}`}>
                             {u.status}
                           </span>
                         </div>
@@ -629,7 +678,17 @@ export const AdminUserWalletsAddresses: React.FC<{
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => handleImpersonateUser(selectedUserId, selectedUser?.email)}
+                      disabled={impersonatingId === selectedUserId}
+                      className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs flex items-center gap-1.5 shadow-md shadow-amber-500/20 transition cursor-pointer active:scale-95 disabled:opacity-50"
+                      title="Directly log into this user's account and browse from their perspective"
+                    >
+                      <LogIn className="w-3.5 h-3.5" />
+                      {impersonatingId === selectedUserId ? 'Authenticating…' : 'Log In to User Account'}
+                    </button>
                     <button
                       onClick={() => setShowAdjustBalance(!showAdjustBalance)}
                       className="px-3.5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 shadow-md shadow-cyan-500/20 transition cursor-pointer"

@@ -1874,6 +1874,79 @@ app.get('/api/admin/users', requireAdmin, async (req, res) => {
   }
 });
 
+// Admin Impersonation: Allows admin to log in directly into any user account (old or new)
+app.post('/api/admin/users/:userId/impersonate', requireAdmin, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT id, email, status, kyc_status AS "kycStatus", created_at AS "createdAt", session_version FROM users WHERE id=$1',
+      [req.params.userId]
+    );
+    if (!rows.length) {
+      return res.status(404).json({ error: 'User account not found.' });
+    }
+    const targetUser = rows[0];
+
+    const token = signUserToken({
+      userId: targetUser.id,
+      email: targetUser.email,
+      version: targetUser.session_version || 0,
+      exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 7,
+      impersonatedBy: req.admin.adminId,
+      impersonatedByEmail: req.admin.email
+    });
+
+    // Set cookie for browser session as well
+    res.setHeader(
+      'Set-Cookie',
+      `kroma_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${7 * 24 * 60 * 60}${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`
+    );
+
+    // Record audit log
+    await pool.query(
+      'INSERT INTO audit_logs(admin_id, action, entity_type, entity_id, details) VALUES($1, $2, $3, $4, $5)',
+      [
+        req.admin.adminId,
+        'impersonate_user',
+        'user',
+        targetUser.id,
+        JSON.stringify({
+          targetEmail: targetUser.email,
+          adminEmail: req.admin.email,
+          action: 'admin_login_as_user',
+          ip: req.ip,
+          time: new Date().toISOString()
+        })
+      ]
+    );
+
+    res.json({
+      success: true,
+      message: `Admin successfully authenticated as user ${targetUser.email}`,
+      token,
+      user: {
+        id: targetUser.id,
+        email: targetUser.email,
+        status: targetUser.status,
+        kycStatus: targetUser.kycStatus,
+        createdAt: targetUser.createdAt
+      },
+      impersonator: {
+        adminId: req.admin.adminId,
+        adminEmail: req.admin.email
+      }
+    });
+  } catch (err) {
+    console.error('Error during admin impersonation:', err);
+    res.status(500).json({ error: 'Failed to log into user account.' });
+  }
+});
+
+// Exit impersonation session
+app.post('/api/admin/exit-impersonation', async (_req, res) => {
+  res.setHeader('Set-Cookie', 'kroma_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0');
+  res.json({ success: true, message: 'Logged out of user session.' });
+});
+
 // Get comprehensive balance information for an individual user
 app.get('/api/admin/users/:userId/wallets', requireAdmin, async (req, res) => {
   try {

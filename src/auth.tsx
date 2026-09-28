@@ -35,21 +35,62 @@ export const authFetch = async (input: RequestInfo | URL, init?: RequestInit): P
   });
 };
 
+export interface ImpersonationInfo {
+  userId: string;
+  userEmail: string;
+  adminEmail: string;
+  startedAt: number;
+}
+
+const IMPERSONATE_KEY = 'kroma_impersonating';
+
+export const getImpersonationData = (): ImpersonationInfo | null => {
+  try {
+    const raw = sessionStorage.getItem(IMPERSONATE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
+export const setImpersonationSession = (token: string, user: AuthUser, adminEmail?: string) => {
+  setStoredToken(token);
+  try {
+    sessionStorage.setItem(IMPERSONATE_KEY, JSON.stringify({
+      userId: user.id,
+      userEmail: user.email,
+      adminEmail: adminEmail || 'admin@kroma.io',
+      startedAt: Date.now()
+    }));
+  } catch {}
+};
+
+export const clearImpersonationSession = () => {
+  try {
+    sessionStorage.removeItem(IMPERSONATE_KEY);
+  } catch {}
+};
+
 type AuthContextValue = {
   user: AuthUser | null;
   loading: boolean;
+  impersonation: ImpersonationInfo | null;
   login: (email:string, password:string) => Promise<void>;
   signup: (email:string, password:string) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
+  loginAsUser: (token: string, user: AuthUser, adminEmail?: string) => void;
+  exitImpersonation: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+
 const api = (p:string) => `${API}${p}`;
 
 export const AuthProvider:React.FC<{children:React.ReactNode}> = ({children}) => {
   const [user, setUser] = useState<AuthUser|null>(null);
   const [loading, setLoading] = useState(true);
+  const [impersonation, setImpersonation] = useState<ImpersonationInfo | null>(() => getImpersonationData());
 
   const refresh = async () => {
     try {
@@ -64,6 +105,7 @@ export const AuthProvider:React.FC<{children:React.ReactNode}> = ({children}) =>
       setUser(null);
     } finally {
       setLoading(false);
+      setImpersonation(getImpersonationData());
     }
   };
 
@@ -83,6 +125,8 @@ export const AuthProvider:React.FC<{children:React.ReactNode}> = ({children}) =>
     if (d.token) {
       setStoredToken(d.token);
     }
+    clearImpersonationSession();
+    setImpersonation(null);
     setUser(d.user);
   };
 
@@ -98,17 +142,38 @@ export const AuthProvider:React.FC<{children:React.ReactNode}> = ({children}) =>
     if (d.token) {
       setStoredToken(d.token);
     }
+    clearImpersonationSession();
+    setImpersonation(null);
     setUser(d.user);
   };
 
+  const loginAsUser = (token: string, targetUser: AuthUser, adminEmail?: string) => {
+    setImpersonationSession(token, targetUser, adminEmail);
+    setImpersonation(getImpersonationData());
+    setUser(targetUser);
+  };
+
+  const exitImpersonation = async () => {
+    clearImpersonationSession();
+    setStoredToken(null);
+    setImpersonation(null);
+    await fetch(api('/api/admin/exit-impersonation'), { method: 'POST', credentials: 'include' }).catch(() => {});
+    await authFetch(api('/api/auth/logout'), { method: 'POST' }).catch(() => {});
+    setUser(null);
+    // Navigate back to admin console
+    window.location.href = '/admin';
+  };
+
   const logout = async () => {
+    clearImpersonationSession();
+    setImpersonation(null);
     setStoredToken(null);
     await authFetch(api('/api/auth/logout'), { method: 'POST' }).catch(() => {});
     setUser(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, signup, logout, refresh }}>
+    <AuthContext.Provider value={{ user, loading, impersonation, login, signup, logout, refresh, loginAsUser, exitImpersonation }}>
       {children}
     </AuthContext.Provider>
   );
