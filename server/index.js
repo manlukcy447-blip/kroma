@@ -1097,10 +1097,38 @@ app.get('/api/deposit-addresses/active', async (req, res) => {
   if (rows.length === 0) {
     const params = [asset];
     let sql = 'SELECT id,asset,network,address,label,min_deposit AS "minDeposit",instructions,enabled FROM deposit_addresses WHERE asset=$1 AND enabled=true';
-    if (network) { params.push(network); sql += ' AND (network=$2 OR network ILIKE $2)'; }
+    if (network) {
+      params.push(network);
+      sql += ' AND (network=$2 OR network ILIKE $2)';
+    }
     sql += ' ORDER BY network LIMIT 20';
     const resSql = await pool.query(sql, params);
-    rows = resSql.rows;
+    if (resSql.rows.length > 0) {
+      rows = resSql.rows;
+    } else if (network) {
+      // Fallback: If network variant string differs slightly (e.g. SegWit vs BTC)
+      const cleanNetFirstWord = network.replace(/[()]/g, '').trim().split(' ')[0];
+      const fallbackGlobal = await pool.query(
+        `SELECT id,asset,network,address,label,min_deposit AS "minDeposit",instructions,enabled
+         FROM deposit_addresses
+         WHERE asset=$1 AND enabled=true
+         ORDER BY (CASE WHEN network ILIKE $2 THEN 0 ELSE 1 END), created_at DESC LIMIT 5`,
+        [asset, `%${cleanNetFirstWord}%`]
+      );
+      if (fallbackGlobal.rows.length > 0) {
+        rows = fallbackGlobal.rows;
+      } else {
+        // Ultimate fallback: any active address for this asset
+        const anyGlobal = await pool.query(
+          `SELECT id,asset,network,address,label,min_deposit AS "minDeposit",instructions,enabled
+           FROM deposit_addresses
+           WHERE asset=$1 AND enabled=true
+           LIMIT 1`,
+          [asset]
+        );
+        rows = anyGlobal.rows;
+      }
+    }
   }
 
   res.json({ addresses: rows });

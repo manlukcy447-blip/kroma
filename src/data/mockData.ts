@@ -33,7 +33,7 @@ export const CRYPTO_ASSETS: CryptoAsset[] = [
         feeAsset: 'BTC',
         estimatedTime: '20-40 min',
         minConfirmations: 2,
-        depositAddress: 'bc1q9v8t3z8l58u4r3kxv7m49m9k8f87w7qg3a3c2',
+        depositAddress: 'bc1q9g4z5et7va50pn599f763zfvlglegyhz2cagyz',
       },
       {
         id: 'btc-lightning',

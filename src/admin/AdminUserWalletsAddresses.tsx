@@ -291,6 +291,16 @@ export const AdminUserWalletsAddresses: React.FC<{
       // Reload user data
       await loadUserDetails(selectedUserId);
       if (onRefreshParent) onRefreshParent();
+      try {
+        localStorage.setItem('kroma_balance_adjustment_event', JSON.stringify({
+          type: 'address_updated',
+          userId: selectedUserId,
+          asset: payload.asset,
+          network: payload.network,
+          time: Date.now()
+        }));
+        window.dispatchEvent(new CustomEvent('kroma:wallet-refresh', { detail: { type: 'address_updated' } }));
+      } catch {}
     } catch (err: any) {
       setStatusMessage({ type: 'error', text: err?.message || 'Error saving user network address' });
     } finally {

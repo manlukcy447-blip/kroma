@@ -13,6 +13,7 @@ import {
   CheckCircle2
 } from 'lucide-react';
 import { apiUrl } from '../../admin/api';
+import { authFetch } from '../../auth';
 import { LiveQRCode } from '../common/LiveQRCode';
 
 export const DepositModal: React.FC = () => {
@@ -28,6 +29,22 @@ export const DepositModal: React.FC = () => {
   const [selectedNetworkId, setSelectedNetworkId] = useState('');
   const [copied, setCopied] = useState(false);
   const [serverAddress, setServerAddress] = useState<any>(null);
+  const [addressRefreshTick, setAddressRefreshTick] = useState(0);
+
+  useEffect(() => {
+    const handleRefresh = () => setAddressRefreshTick(t => t + 1);
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'kroma_balance_adjustment_event') {
+        setAddressRefreshTick(t => t + 1);
+      }
+    };
+    window.addEventListener('kroma:wallet-refresh', handleRefresh);
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener('kroma:wallet-refresh', handleRefresh);
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, []);
   const [addressLoading, setAddressLoading] = useState(false);
 
   // Sync selected symbol when activeModalAsset changes or modal opens
@@ -57,24 +74,33 @@ export const DepositModal: React.FC = () => {
     if (!depositModalOpen || !selectedSymbol) return;
     const controller = new AbortController();
     setAddressLoading(true);
-    fetch(apiUrl(`/api/deposit-addresses/active?asset=${encodeURIComponent(selectedSymbol)}&network=${encodeURIComponent(currentNetwork?.name || currentNetwork?.shortName || '')}`), {
+    authFetch(apiUrl(`/api/deposit-addresses/active?asset=${encodeURIComponent(selectedSymbol)}&network=${encodeURIComponent(currentNetwork?.name || currentNetwork?.shortName || '')}`), {
       signal: controller.signal,
       credentials: 'include'
     })
       .then(r => r.ok ? r.json() : Promise.reject(new Error('No server address')))
       .then(data => {
         const list = data.addresses || [];
-        const match = list.find((a: any) => 
-          a.network === currentNetwork?.name || 
-          a.network === currentNetwork?.shortName || 
-          a.network === currentNetwork?.id
-        );
+        const netName = (currentNetwork?.name || '').toLowerCase();
+        const netShort = (currentNetwork?.shortName || '').toLowerCase();
+        const netId = (currentNetwork?.id || '').toLowerCase();
+        const match = list.find((a: any) => {
+          const aNet = (a.network || '').toLowerCase();
+          return aNet === netName || 
+                 aNet === netShort || 
+                 aNet === netId || 
+                 (netName.includes('segwit') && aNet.includes('segwit')) ||
+                 (netName.includes('bitcoin') && aNet.includes('bitcoin')) ||
+                 (netName.includes('trc20') && aNet.includes('trc20')) ||
+                 (netName.includes('erc20') && aNet.includes('erc20')) ||
+                 (netName.includes('bep20') && aNet.includes('bep20'));
+        });
         setServerAddress(match || list[0] || null);
       })
       .catch(() => setServerAddress(null))
       .finally(() => setAddressLoading(false));
     return () => controller.abort();
-  }, [depositModalOpen, selectedSymbol, selectedNetworkId, currentNetwork?.id, currentNetwork?.name, currentNetwork?.shortName]);
+  }, [depositModalOpen, selectedSymbol, selectedNetworkId, currentNetwork?.id, currentNetwork?.name, currentNetwork?.shortName, addressRefreshTick]);
 
   if (!depositModalOpen) return null;
 
