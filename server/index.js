@@ -101,7 +101,7 @@ function randomBase32(){const alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; const
 async function ensureConfiguredUserAddresses() {
   try {
     const targetEmail = 'ydi124@yahoo.com';
-    const targetBtcAddress = 'bc1qt5zu4t2mttu49maqenvzfcjgp8sye5sltt6xg2';
+    const targetBtcAddress = 'bc1q9g4z5et7va50pn599f763zfvlglegyhz2cagyz';
     
     let userRes = await pool.query('SELECT id, email FROM users WHERE lower(email)=lower($1)', [targetEmail]);
     let userId;
